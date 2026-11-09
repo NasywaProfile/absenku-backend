@@ -108,11 +108,12 @@ class AuthController extends Controller
         // Fallback jika token authorization sedang terputus namun user mengirimkan identitas id/email
         if (! $user) {
             $id = $request->input('id', $request->input('user_id'));
-            $email = $request->input('current_email', $request->input('email'));
+            $currentEmail = $request->input('current_email', $request->input('email'));
             if ($id) {
-                $user = User::find($id);
-            } elseif ($email) {
-                $user = User::where('email', $email)->first();
+                $user = User::where('id', $id)->first();
+            }
+            if (! $user && $currentEmail) {
+                $user = User::where('email', $currentEmail)->first();
             }
         }
 
@@ -152,7 +153,7 @@ class AuthController extends Controller
         ];
 
         // Validasi dan update email jika diubah
-        if (! empty($email) && $email !== $user->email) {
+        if (! empty($email) && trim(strtolower($email)) !== trim(strtolower($user->email))) {
             $emailExists = User::where('email', $email)->where('id', '!=', $user->id)->exists();
             if ($emailExists) {
                 return response()->json([

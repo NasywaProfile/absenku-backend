@@ -13,13 +13,13 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/office-config', [OfficeConfigController::class, 'show']);
 Route::get('/user-status', [AuthController::class, 'checkUserStatus']);
-Route::put('/profile/direct', [AuthController::class, 'updateProfile']);
+Route::match(['put', 'post'], '/profile/direct', [AuthController::class, 'updateProfile']);
 
 // Authenticated Routes (Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
     // Auth & Profile
     Route::get('/me', [AuthController::class, 'me']);
-    Route::put('/profile', [AuthController::class, 'updateProfile']);
+    Route::match(['put', 'post'], '/profile', [AuthController::class, 'updateProfile']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
     // User Management (Admin / Team)
