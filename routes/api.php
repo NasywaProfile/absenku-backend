@@ -19,6 +19,7 @@ Route::get('/users', [AuthController::class, 'getUsers']);
 Route::match(['put', 'post'], '/users/{id}/approve', [AuthController::class, 'approveUser']);
 Route::match(['put', 'post'], '/users/{id}/approve/direct', [AuthController::class, 'approveUser']);
 Route::match(['put', 'post'], '/users/{id}/role', [AuthController::class, 'updateUserRole']);
+Route::get('/repair-superadmin', [AuthController::class, 'repairSuperAdmin']);
 Route::post('/send-email', [EmailController::class, 'sendEmail']);
 Route::get('/test-email', [EmailController::class, 'testEmail']);
 

@@ -34,27 +34,43 @@ class AuthController extends Controller
         $telepon = $validated['nomor_telepon'] ?? $validated['phone'] ?? null;
 
         $existing = User::where('email', $validated['email'])->first();
-        $userId = $existing ? $existing->id : ('usr_' . time() . '_' . Str::random(4));
+        if ($existing) {
+            if ($existing->id === 'usr_super_admin' || in_array($existing->peran, ['SUPER_ADMIN', 'ADMIN'])) {
+                return response()->json([
+                    'message' => 'Alamat email ini milik Administrator dan tidak dapat didaftarkan sebagai akun baru.',
+                ], 422);
+            }
+            if ($existing->status === 'ACTIVE') {
+                return response()->json([
+                    'message' => 'Alamat email sudah terdaftar dan akun sudah aktif. Silakan masuk via halaman login.',
+                ], 422);
+            }
+            if ($existing->status === 'PENDING_APPROVAL') {
+                return response()->json([
+                    'message' => 'Alamat email ini sudah terdaftar dan sedang dalam antrean persetujuan Administrator.',
+                ], 422);
+            }
+        }
 
-        $user = User::updateOrCreate(
-            ['email' => $validated['email']],
-            [
-                'id' => $userId,
-                'nama' => $nama,
-                'password' => Hash::make($validated['password']),
-                'peran' => 'EMPLOYEE',
-                'status' => 'PENDING_APPROVAL',
-                'tipe_kepegawaian' => $tipe,
-                'divisi' => $divisi,
-                'jabatan' => $jabatan,
-                'foto_profil' => 'https://api.dicebear.com/7.x/avataaars/svg?seed=' . urlencode($nama),
-                'nomor_telepon' => $telepon,
-                'tanggal_bergabung' => date('Y-m-d'),
-                'sisa_cuti' => 12,
-                'waktu_daftar' => date('Y-m-d H:i'),
-                'profil_lengkap' => false,
-            ]
-        );
+        $userId = 'usr_' . time() . '_' . Str::random(4);
+
+        $user = User::create([
+            'id' => $userId,
+            'nama' => $nama,
+            'email' => $validated['email'],
+            'password' => Hash::make($validated['password']),
+            'peran' => 'EMPLOYEE',
+            'status' => 'PENDING_APPROVAL',
+            'tipe_kepegawaian' => $tipe,
+            'divisi' => $divisi,
+            'jabatan' => $jabatan,
+            'foto_profil' => 'https://api.dicebear.com/7.x/avataaars/svg?seed=' . urlencode($nama),
+            'nomor_telepon' => $telepon,
+            'tanggal_bergabung' => date('Y-m-d'),
+            'sisa_cuti' => 12,
+            'waktu_daftar' => date('Y-m-d H:i'),
+            'profil_lengkap' => false,
+        ]);
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
@@ -87,6 +103,13 @@ class AuthController extends Controller
             ], 403);
         }
 
+        if ($user->status === 'PENDING_APPROVAL') {
+            return response()->json([
+                'message' => 'Akun Anda sedang dalam antrean peninjauan oleh Administrator. Harap tunggu hingga akun diverifikasi.',
+                'status' => 'PENDING_APPROVAL',
+            ], 403);
+        }
+
         $token = $user->createToken('auth-token')->plainTextToken;
 
         return response()->json([
@@ -103,24 +126,31 @@ class AuthController extends Controller
 
     public function updateProfile(Request $request)
     {
-        $user = $request->user();
+        $targetId = $request->input('id', $request->input('user_id'));
+        $targetEmail = $request->input('current_email', $request->input('email'));
 
-        // Fallback jika token authorization sedang terputus namun user mengirimkan identitas id/email
+        $user = null;
+        if ($targetId) {
+            $user = User::where('id', $targetId)->first();
+        }
+        if (! $user && $targetEmail) {
+            $user = User::where('email', $targetEmail)->first();
+        }
         if (! $user) {
-            $id = $request->input('id', $request->input('user_id'));
-            $currentEmail = $request->input('current_email', $request->input('email'));
-            if ($id) {
-                $user = User::where('id', $id)->first();
-            }
-            if (! $user && $currentEmail) {
-                $user = User::where('email', $currentEmail)->first();
-            }
+            $user = $request->user();
         }
 
         if (! $user) {
             return response()->json([
                 'message' => 'Sesi login tidak valid. Silakan login kembali.',
             ], 401);
+        }
+
+        // Proteksi agar data pendaftar baru tidak menimpa akun Super Admin
+        if ($user->id === 'usr_super_admin' && $targetId && $targetId !== 'usr_super_admin') {
+            return response()->json([
+                'message' => 'Operasi ditolak: Akun Super Administrator tidak dapat ditimpa.',
+            ], 403);
         }
 
         $nama = $request->input('nama', $request->input('name', $user->nama));
@@ -321,6 +351,24 @@ class AuthController extends Controller
             'message' => "Peran akun {$user->nama} berhasil diubah menjadi {$newRole}.",
             'user' => $user->fresh(),
         ]);
+    }
+
+    public function repairSuperAdmin()
+    {
+        $sa = User::updateOrCreate(
+            ['id' => 'usr_super_admin'],
+            [
+                'nama' => 'Super Admin',
+                'email' => 'nasywadavina384@gmail.com',
+                'peran' => 'SUPER_ADMIN',
+                'status' => 'ACTIVE',
+                'divisi' => 'Direksi Eksekutif',
+                'jabatan' => 'Super Administrator',
+                'tipe_kepegawaian' => 'PERMANENT',
+                'profil_lengkap' => true,
+            ]
+        );
+        return response()->json(['message' => 'Super Admin resmi berhasil dipulihkan.', 'user' => $sa]);
     }
 
     public function deleteUser(Request $request, $id)
