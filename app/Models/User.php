@@ -37,6 +37,8 @@ class User extends Authenticatable
         'jabatan',
         'foto_profil',
         'nomor_telepon',
+        'jenis_kelamin',
+        'tanggal_lahir',
         'tanggal_bergabung',
         'sisa_cuti',
         'nama_bank',
@@ -79,6 +81,9 @@ class User extends Authenticatable
         'position',
         'avatar',
         'phone',
+        'gender',
+        'birth_date',
+        'birthDate',
         'employment_type',
         'employmentType',
         'join_date',
@@ -99,6 +104,8 @@ class User extends Authenticatable
     public function getPositionAttribute() { return $this->jabatan; }
     public function getAvatarAttribute() { return $this->foto_profil; }
     public function getPhoneAttribute() { return $this->nomor_telepon; }
+    public function getGenderAttribute() { return $this->jenis_kelamin ?: 'L'; }
+    public function getBirthDateAttribute() { return $this->tanggal_lahir ?: '2000-01-01'; }
     public function getEmploymentTypeAttribute() { return $this->tipe_kepegawaian; }
     public function getJoinDateAttribute() { return $this->tanggal_bergabung; }
     public function getLeaveBalanceAttribute() { return $this->sisa_cuti; }

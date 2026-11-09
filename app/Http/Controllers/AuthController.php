@@ -136,11 +136,15 @@ class AuthController extends Controller
         $daruratHp = $request->input('nomor_kontak_darurat', $request->input('emergency_contact_phone', $user->nomor_kontak_darurat));
         $alamat = $request->input('alamat', $request->input('address', $user->alamat));
         $lengkap = $request->input('profil_lengkap', $request->input('is_profile_complete', $user->profil_lengkap));
+        $gender = $request->input('jenis_kelamin', $request->input('gender', $user->jenis_kelamin));
+        $birthDate = $request->input('tanggal_lahir', $request->input('birth_date', $request->input('birthDate', $user->tanggal_lahir)));
 
         $data = [
             'nama' => $nama,
             'foto_profil' => $foto,
             'nomor_telepon' => $telepon,
+            'jenis_kelamin' => $gender ?: ($user->jenis_kelamin ?: 'L'),
+            'tanggal_lahir' => $birthDate ?: ($user->tanggal_lahir ?: '2000-01-01'),
             'divisi' => $divisi,
             'jabatan' => $jabatan,
             'nama_bank' => $bank,
@@ -229,10 +233,15 @@ class AuthController extends Controller
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
 
-        $user->update([
+        $updateData = [
             'status' => 'ACTIVE',
             'profil_lengkap' => true,
-        ]);
+        ];
+        if ($request->has('role') || $request->has('peran')) {
+            $updateData['peran'] = $request->input('role', $request->input('peran'));
+        }
+
+        $user->update($updateData);
 
         // Kirim email persetujuan akun via EmailController
         try {
