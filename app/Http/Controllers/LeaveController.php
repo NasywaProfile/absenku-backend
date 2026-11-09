@@ -134,12 +134,14 @@ class LeaveController extends Controller
                 <p style='font-size: 12px; color: #64748b; margin: 0;'>Pesan ini dikirimkan otomatis oleh sistem Absenku.</p>
             </div>";
 
-            Mail::html($htmlContent, function ($message) use ($user, $labelKategori, $recipientEmail) {
-                $message->to($recipientEmail)
-                        ->subject("[Absenku] Pengajuan {$labelKategori} Baru - {$user->nama}");
-            });
+            $emailReq = new Request([
+                'to' => $recipientEmail,
+                'subject' => "[in-Time] Pengajuan {$labelKategori} Baru - {$user->nama}",
+                'html' => $htmlContent,
+                'text' => "Pemberitahuan Pengajuan Izin Baru: {$user->nama} ({$labelKategori}) dari {$tglMulai} s.d. {$tglSelesai}.",
+            ]);
+            app(EmailController::class)->sendEmail($emailReq);
         } catch (\Throwable $mailErr) {
-            // Log error tanpa menghentikan proses pengajuan
             \Illuminate\Support\Facades\Log::warning('Gagal mengirimkan notifikasi email pengajuan izin: ' . $mailErr->getMessage());
         }
 
@@ -161,10 +163,41 @@ class LeaveController extends Controller
         ]);
 
         // Potong sisa cuti jika kategori adalah LEAVE / CUTI
+        $applicant = User::find($leave->pengguna_id);
         if (in_array($leave->kategori_izin, ['LEAVE', 'CUTI'])) {
-            $applicant = User::find($leave->pengguna_id);
             if ($applicant && $applicant->sisa_cuti >= $leave->jumlah_hari) {
                 $applicant->decrement('sisa_cuti', $leave->jumlah_hari);
+            }
+        }
+
+        // Kirim email konfirmasi ACC ke karyawan pemohon
+        if ($applicant && ! empty($applicant->email)) {
+            try {
+                $emailReq = new Request([
+                    'to' => $applicant->email,
+                    'subject' => "[in-Time] Pengajuan Izin Disetujui ({$leave->kategori_izin})",
+                    'html' => "<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:580px;margin:auto;padding:24px;background:#f8fafc;'>"
+                        . "<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;'>"
+                        . "<div style='background:#1E3A8A;padding:20px 28px;color:#ffffff;'>"
+                        . "<h2 style='margin:0;font-size:18px;'>Pengajuan Izin Telah Disetujui</h2>"
+                        . "</div>"
+                        . "<div style='padding:24px 28px;'>"
+                        . "<p style='font-size:14px;color:#1e293b;'>Halo <strong>{$applicant->nama}</strong>,</p>"
+                        . "<p style='font-size:14px;color:#334155;'>Kabar baik! Pengajuan izin/cuti Anda telah resmi disetujui oleh Administrator.</p>"
+                        . "<table style='width:100%;border-collapse:collapse;margin:20px 0;'>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Kategori:</td><td style='padding:8px 0;color:#0f172a;'>{$leave->kategori_izin}</td></tr>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Periode:</td><td style='padding:8px 0;color:#0f172a;'>{$leave->tanggal_mulai} s/d {$leave->tanggal_selesai} ({$leave->jumlah_hari} Hari)</td></tr>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Disetujui Oleh:</td><td style='padding:8px 0;color:#0f172a;'>{$admin->nama}</td></tr>"
+                        . "<tr><td style='padding:8px 0;font-weight:600;color:#475569;'>Status:</td><td style='padding:8px 0;color:#16a34a;font-weight:bold;'>DISETUJUI (APPROVED)</td></tr>"
+                        . "</table>"
+                        . "</div>"
+                        . "</div>"
+                        . "</div>",
+                    'text' => "Halo {$applicant->nama},\n\nPengajuan {$leave->kategori_izin} Anda ({$leave->tanggal_mulai} s/d {$leave->tanggal_selesai}) telah DISETUJUI oleh {$admin->nama}.",
+                ]);
+                app(EmailController::class)->sendEmail($emailReq);
+            } catch (\Throwable $e) {
+                \Log::warning("Gagal kirim email ACC izin: " . $e->getMessage());
             }
         }
 
@@ -187,6 +220,36 @@ class LeaveController extends Controller
             'waktu_persetujuan' => date('Y-m-d H:i'),
             'alasan_penolakan' => $reason,
         ]);
+
+        // Kirim email notifikasi penolakan ke karyawan pemohon
+        $applicant = User::find($leave->pengguna_id);
+        if ($applicant && ! empty($applicant->email)) {
+            try {
+                $emailReq = new Request([
+                    'to' => $applicant->email,
+                    'subject' => "[in-Time] Pengajuan Izin Ditolak ({$leave->kategori_izin})",
+                    'html' => "<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:580px;margin:auto;padding:24px;background:#f8fafc;'>"
+                        . "<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;'>"
+                        . "<div style='background:#dc2626;padding:20px 28px;color:#ffffff;'>"
+                        . "<h2 style='margin:0;font-size:18px;'>Pemberitahuan Penolakan Izin</h2>"
+                        . "</div>"
+                        . "<div style='padding:24px 28px;'>"
+                        . "<p style='font-size:14px;color:#1e293b;'>Halo <strong>{$applicant->nama}</strong>,</p>"
+                        . "<p style='font-size:14px;color:#334155;'>Mohon maaf, pengajuan izin/cuti Anda belum dapat disetujui oleh Administrator.</p>"
+                        . "<table style='width:100%;border-collapse:collapse;margin:20px 0;'>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Kategori:</td><td style='padding:8px 0;color:#0f172a;'>{$leave->kategori_izin}</td></tr>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Alasan Penolakan:</td><td style='padding:8px 0;color:#dc2626;font-weight:bold;'>" . ($reason ?: 'Tidak memenuhi ketentuan operasional') . "</td></tr>"
+                        . "</table>"
+                        . "</div>"
+                        . "</div>"
+                        . "</div>",
+                    'text' => "Halo {$applicant->nama},\n\nPengajuan {$leave->kategori_izin} Anda ditolak. Alasan: " . ($reason ?: '-'),
+                ]);
+                app(EmailController::class)->sendEmail($emailReq);
+            } catch (\Throwable $e) {
+                \Log::warning("Gagal kirim email penolakan izin: " . $e->getMessage());
+            }
+        }
 
         return response()->json([
             'message' => 'Pengajuan telah ditolak.',

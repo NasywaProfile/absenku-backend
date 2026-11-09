@@ -234,6 +234,39 @@ class AuthController extends Controller
             'profil_lengkap' => true,
         ]);
 
+        // Kirim email persetujuan akun via EmailController
+        try {
+            $roleLabel = $user->peran === 'SUPER_ADMIN' ? 'Superadmin' : ($user->peran === 'ADMIN' ? 'Admin' : 'Karyawan');
+            $emailReq = new Request([
+                'to' => $user->email,
+                'subject' => "Akun Terverifikasi: Selamat Datang di in-Time, {$user->nama}!",
+                'html' => "<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:580px;margin:auto;padding:24px;background:#f8fafc;'>"
+                    . "<div style='background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);'>"
+                    . "<div style='background:#1E3A8A;padding:20px 28px;color:#ffffff;'>"
+                    . "<h2 style='margin:0;font-size:18px;'>Pendaftaran Akun Telah Disetujui</h2>"
+                    . "</div>"
+                    . "<div style='padding:24px 28px;'>"
+                    . "<p style='font-size:14px;color:#1e293b;line-height:1.6;'>Halo <strong>{$user->nama}</strong>,</p>"
+                    . "<p style='font-size:14px;color:#334155;line-height:1.6;'>Pendaftaran akun Anda pada platform in-Time telah resmi disetujui. Akun Anda saat ini sudah aktif dan dapat langsung digunakan untuk presensi dan manajemen tugas.</p>"
+                    . "<table style='width:100%;border-collapse:collapse;margin:20px 0;'>"
+                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;width:35%;font-size:13px;'>Nama Pengguna:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$user->nama}</td></tr>"
+                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Email Terdaftar:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$user->email}</td></tr>"
+                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Peran Akun:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$roleLabel}</td></tr>"
+                    . "<tr><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Status Akun:</td><td style='padding:10px 0;color:#16a34a;font-weight:bold;font-size:13px;'>Aktif (Terverifikasi)</td></tr>"
+                    . "</table>"
+                    . "<div style='text-align:center;margin:28px 0 16px 0;'>"
+                    . "<a href='https://in-time.duckdns.org' style='background-color:#1E3A8A;color:#ffffff;padding:12px 26px;font-size:13px;font-weight:700;text-decoration:none;border-radius:10px;display:inline-block;'>Buka Portal in-Time &rarr;</a>"
+                    . "</div>"
+                    . "</div>"
+                    . "</div>"
+                    . "</div>",
+                'text' => "Halo {$user->nama},\n\nAkun in-Time Anda telah resmi disetujui dan aktif.\nEmail: {$user->email}\nPeran: {$roleLabel}\nStatus: Aktif\n\nSilakan login ke https://in-time.duckdns.org",
+            ]);
+            app(EmailController::class)->sendEmail($emailReq);
+        } catch (\Throwable $mailErr) {
+            \Log::warning("[AuthController] Gagal auto-send email persetujuan: " . $mailErr->getMessage());
+        }
+
         return response()->json([
             'message' => 'Akun karyawan berhasil disetujui.',
             'user' => $user,
