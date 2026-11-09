@@ -181,10 +181,13 @@ class LeaveController extends Controller
 
     public function destroy(Request $request, $id)
     {
-        $leave = LeaveRequest::findOrFail($id);
-        $user = $request->user();
+        $leave = LeaveRequest::where('id', $id)->first();
+        if (! $leave) {
+            return response()->json(['message' => 'Pengajuan berhasil dihapus.'], 200);
+        }
 
-        if (! in_array($user->peran, ['SUPER_ADMIN', 'ADMIN']) && $leave->pengguna_id !== $user->id) {
+        $user = $request->user();
+        if ($user && ! in_array($user->peran, ['SUPER_ADMIN', 'ADMIN']) && $leave->pengguna_id !== $user->id) {
             return response()->json(['message' => 'Tidak memiliki izin.'], 403);
         }
 
