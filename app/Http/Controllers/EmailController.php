@@ -33,7 +33,8 @@ class EmailController extends Controller
         $sent = false;
         $errors = [];
         $smtpUser = env('MAIL_USERNAME', env('SMTP_USER', 'naswa.wijaya31@gmail.com'));
-        $fromName = env('MAIL_FROM_NAME', env('SMTP_FROM_NAME', 'in-Time Notifikasi'));
+        $rawFromName = env('MAIL_FROM_NAME', env('SMTP_FROM_NAME', env('APP_NAME', 'in-Time')));
+        $fromName = (empty($rawFromName) || strtolower(trim($rawFromName)) === 'laravel') ? 'in-Time' : trim($rawFromName);
         $fromAddress = env('MAIL_FROM_ADDRESS', $smtpUser);
 
         $passwords = array_values(array_unique(array_filter([
