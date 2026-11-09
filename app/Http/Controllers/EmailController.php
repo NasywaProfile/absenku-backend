@@ -44,69 +44,69 @@ class EmailController extends Controller
 
         $ports = [587, 465];
 
-        // 1. OPSI UTAMA: SYMFONY ESMTP TRANSPORT (GMAIL SMTP)
-        foreach ($passwords as $pwd) {
-            if ($sent) {
-                break;
-            }
-            foreach ($ports as $port) {
-                if ($sent) {
-                    break;
-                }
-                try {
-                    $isSsl = ($port === 465);
-                    $transport = new EsmtpTransport('smtp.gmail.com', $port, $isSsl);
-                    $transport->setUsername($smtpUser);
-                    $transport->setPassword($pwd);
-                    $mailer = new Mailer($transport);
+        // 1. OPSI UTAMA: RESEND REST API (in-Time <onboarding@resend.dev>)
+        $resendKey = env('RESEND_API_KEY');
+        if ($resendKey) {
+            try {
+                $fromEmail = env('RESEND_FROM_EMAIL', 'onboarding@resend.dev');
 
-                    $email = (new Email())
-                        ->from(new Address($fromAddress, $fromName))
-                        ->to($to)
-                        ->subject($subject)
-                        ->html($html ?: $text);
+                $response = Http::withHeaders([
+                    'Authorization' => "Bearer {$resendKey}",
+                    'Content-Type' => 'application/json',
+                ])->post('https://api.resend.com/emails', [
+                    'from' => "in-Time <{$fromEmail}>",
+                    'to' => [$to],
+                    'subject' => $subject,
+                    'html' => $html ?: $text,
+                    'text' => $text ?: strip_tags($html),
+                ]);
 
-                    if (! empty($text)) {
-                        $email->text($text);
-                    }
-
-                    $mailer->send($email);
+                if ($response->successful()) {
                     $sent = true;
-                    Log::info("[EmailController] Email berhasil terkirim ke {$to} via Gmail SMTP (port {$port})");
-                } catch (\Throwable $e) {
-                    $errors[] = "SMTP port {$port}: " . $e->getMessage();
-                    Log::warning("[EmailController] SMTP port {$port} gagal: " . $e->getMessage());
+                    Log::info("[EmailController] Email berhasil terkirim ke {$to} via Resend API (in-Time <{$fromEmail}>)");
+                } else {
+                    $errors[] = 'Resend API: ' . $response->body();
+                    Log::warning("[EmailController] Resend API gagal: " . $response->body());
                 }
+            } catch (\Throwable $e2) {
+                $errors[] = 'Resend Exception: ' . $e2->getMessage();
             }
         }
 
-        // 2. OPSI FALLBACK: RESEND API
+        // 2. OPSI FALLBACK: SYMFONY ESMTP TRANSPORT (GMAIL SMTP)
         if (! $sent) {
-            $resendKey = env('RESEND_API_KEY');
-            if ($resendKey) {
-                try {
-                    $fromEmail = env('RESEND_FROM_EMAIL', 'onboarding@resend.dev');
-
-                    $response = Http::withHeaders([
-                        'Authorization' => "Bearer {$resendKey}",
-                        'Content-Type' => 'application/json',
-                    ])->post('https://api.resend.com/emails', [
-                        'from' => "{$fromName} <{$fromEmail}>",
-                        'to' => [$to],
-                        'subject' => $subject,
-                        'html' => $html ?: $text,
-                        'text' => $text ?: strip_tags($html),
-                    ]);
-
-                    if ($response->successful()) {
-                        $sent = true;
-                        Log::info("[EmailController] Email berhasil terkirim ke {$to} via Resend API");
-                    } else {
-                        $errors[] = 'Resend API: ' . $response->body();
-                        Log::warning("[EmailController] Resend API gagal: " . $response->body());
+            foreach ($passwords as $pwd) {
+                if ($sent) {
+                    break;
+                }
+                foreach ($ports as $port) {
+                    if ($sent) {
+                        break;
                     }
-                } catch (\Throwable $e2) {
-                    $errors[] = 'Resend Exception: ' . $e2->getMessage();
+                    try {
+                        $isSsl = ($port === 465);
+                        $transport = new EsmtpTransport('smtp.gmail.com', $port, $isSsl);
+                        $transport->setUsername($smtpUser);
+                        $transport->setPassword($pwd);
+                        $mailer = new Mailer($transport);
+
+                        $email = (new Email())
+                            ->from(new Address($fromAddress, 'in-Time'))
+                            ->to($to)
+                            ->subject($subject)
+                            ->html($html ?: $text);
+
+                        if (! empty($text)) {
+                            $email->text($text);
+                        }
+
+                        $mailer->send($email);
+                        $sent = true;
+                        Log::info("[EmailController] Email berhasil terkirim ke {$to} via Gmail SMTP (port {$port})");
+                    } catch (\Throwable $e) {
+                        $errors[] = "SMTP port {$port}: " . $e->getMessage();
+                        Log::warning("[EmailController] SMTP port {$port} gagal: " . $e->getMessage());
+                    }
                 }
             }
         }
