@@ -24,6 +24,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/users', [AuthController::class, 'getUsers']);
     Route::post('/users/{id}/approve', [AuthController::class, 'approveUser']);
     Route::post('/users/{id}/reject', [AuthController::class, 'rejectUser']);
+    Route::delete('/users/{id}', [AuthController::class, 'deleteUser']);
 
     // Office Configuration
     Route::put('/office-config', [OfficeConfigController::class, 'update']);
@@ -54,6 +55,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/chat/topics', [ChatController::class, 'getTopics']);
     Route::post('/chat/topics', [ChatController::class, 'storeTopic']);
     Route::put('/chat/topics/{id}', [ChatController::class, 'updateTopic']);
+    Route::delete('/chat/topics/{id}', [ChatController::class, 'deleteTopic']);
     Route::get('/chat/messages', [ChatController::class, 'getMessages']);
     Route::post('/chat/messages', [ChatController::class, 'sendMessage']);
+    Route::delete('/chat/messages/{id}', [ChatController::class, 'deleteMessage']);
 });

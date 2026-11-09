@@ -42,28 +42,39 @@ class ChatTopic extends Model
         'title',
         'status',
         'tagged_teammate_ids',
+        'taggedTeammateIds',
         'files',
         'links',
         'images',
         'short_notes',
+        'shortNotes',
         'long_notes',
+        'longNotes',
         'created_by',
+        'createdBy',
         'created_by_name',
+        'createdByName',
         'created_by_avatar',
+        'createdByAvatar',
+        'created_at_formatted',
+        'createdAt',
+        'updatedAt',
         'comments',
     ];
 
     public function getTitleAttribute() { return $this->judul_topik; }
     public function getStatusAttribute() { return $this->status_topik; }
-    public function getTaggedTeammateIdsAttribute() { return $this->id_anggota_ditandai; }
-    public function getFilesAttribute() { return $this->berkas; }
-    public function getLinksAttribute() { return $this->tautan; }
-    public function getImagesAttribute() { return $this->gambar; }
-    public function getShortNotesAttribute() { return $this->catatan_singkat; }
-    public function getLongNotesAttribute() { return $this->catatan_lengkap; }
+    public function getTaggedTeammateIdsAttribute() { return $this->id_anggota_ditandai ?? []; }
+    public function getFilesAttribute() { return $this->berkas ?? []; }
+    public function getLinksAttribute() { return $this->tautan ?? []; }
+    public function getImagesAttribute() { return $this->gambar ?? []; }
+    public function getShortNotesAttribute() { return $this->catatan_singkat ?? ''; }
+    public function getLongNotesAttribute() { return $this->catatan_lengkap ?? ''; }
     public function getCreatedByAttribute() { return $this->dibuat_oleh_id; }
     public function getCreatedByNameAttribute() { return $this->dibuat_oleh_nama; }
     public function getCreatedByAvatarAttribute() { return $this->dibuat_oleh_foto; }
+    public function getCreatedAtAttribute() { return $this->attributes['created_at'] ?? ''; }
+    public function getUpdatedAtAttribute() { return $this->attributes['updated_at'] ?? ''; }
 
     public function getCommentsAttribute()
     {

@@ -22,36 +22,37 @@ class ChatController extends Controller
     {
         $user = $request->user();
 
-        $judul = $request->input('judul_topik', $request->input('title'));
+        $id = $request->input('id', 'tpc_' . time() . '_' . Str::random(4));
+        $judul = $request->input('judul_topik', $request->input('title', 'Topik Diskusi'));
         $status = $request->input('status_topik', $request->input('status', 'NEED_COMMENTS'));
-        $tag = $request->input('id_anggota_ditandai', $request->input('tagged_teammate_ids', []));
+        $tag = $request->input('id_anggota_ditandai', $request->input('taggedTeammateIds', $request->input('tagged_teammate_ids', [])));
         $berkas = $request->input('berkas', $request->input('files', []));
         $tautan = $request->input('tautan', $request->input('links', []));
         $gambar = $request->input('gambar', $request->input('images', []));
-        $catatanSingkat = $request->input('catatan_singkat', $request->input('short_notes', ''));
-        $catatanLengkap = $request->input('catatan_lengkap', $request->input('long_notes', ''));
+        $catatanSingkat = $request->input('catatan_singkat', $request->input('shortNotes', $request->input('short_notes', $request->input('description', ''))));
+        $catatanLengkap = $request->input('catatan_lengkap', $request->input('longNotes', $request->input('long_notes', '')));
 
-        $topicId = 'tpc_' . time() . '_' . Str::random(4);
-
-        $topic = ChatTopic::create([
-            'id' => $topicId,
-            'judul_topik' => $judul,
-            'status_topik' => $status,
-            'id_anggota_ditandai' => $tag,
-            'berkas' => $berkas,
-            'tautan' => $tautan,
-            'gambar' => $gambar,
-            'catatan_singkat' => $catatanSingkat,
-            'catatan_lengkap' => $catatanLengkap,
-            'dibuat_oleh_id' => $user->id,
-            'dibuat_oleh_nama' => $user->nama,
-            'dibuat_oleh_foto' => $user->foto_profil,
-        ]);
+        $topic = ChatTopic::updateOrCreate(
+            ['id' => $id],
+            [
+                'judul_topik' => $judul,
+                'status_topik' => $status,
+                'id_anggota_ditandai' => $tag,
+                'berkas' => $berkas,
+                'tautan' => $tautan,
+                'gambar' => $gambar,
+                'catatan_singkat' => $catatanSingkat,
+                'catatan_lengkap' => $catatanLengkap,
+                'dibuat_oleh_id' => $user ? $user->id : $request->input('createdBy', $request->input('authorId', 'usr_super_admin')),
+                'dibuat_oleh_nama' => $user ? $user->nama : $request->input('createdByName', $request->input('authorName', 'Administrator')),
+                'dibuat_oleh_foto' => $user ? $user->foto_profil : $request->input('createdByAvatar', $request->input('authorAvatar', '')),
+            ]
+        );
 
         return response()->json([
-            'message' => 'Topik diskusi berhasil dibuat.',
+            'message' => 'Topik diskusi berhasil disimpan.',
             'topic' => $topic,
-        ], 201);
+        ], 200);
     }
 
     public function updateTopic(Request $request, $id)
@@ -65,8 +66,8 @@ class ChatController extends Controller
         if ($request->has('status_topik') || $request->has('status')) {
             $data['status_topik'] = $request->input('status_topik', $request->input('status'));
         }
-        if ($request->has('id_anggota_ditandai') || $request->has('tagged_teammate_ids')) {
-            $data['id_anggota_ditandai'] = $request->input('id_anggota_ditandai', $request->input('tagged_teammate_ids'));
+        if ($request->has('id_anggota_ditandai') || $request->has('taggedTeammateIds') || $request->has('tagged_teammate_ids')) {
+            $data['id_anggota_ditandai'] = $request->input('id_anggota_ditandai', $request->input('taggedTeammateIds', $request->input('tagged_teammate_ids')));
         }
         if ($request->has('berkas') || $request->has('files')) {
             $data['berkas'] = $request->input('berkas', $request->input('files'));
@@ -77,11 +78,11 @@ class ChatController extends Controller
         if ($request->has('gambar') || $request->has('images')) {
             $data['gambar'] = $request->input('gambar', $request->input('images'));
         }
-        if ($request->has('catatan_singkat') || $request->has('short_notes')) {
-            $data['catatan_singkat'] = $request->input('catatan_singkat', $request->input('short_notes'));
+        if ($request->has('catatan_singkat') || $request->has('shortNotes') || $request->has('short_notes')) {
+            $data['catatan_singkat'] = $request->input('catatan_singkat', $request->input('shortNotes', $request->input('short_notes')));
         }
-        if ($request->has('catatan_lengkap') || $request->has('long_notes')) {
-            $data['catatan_lengkap'] = $request->input('catatan_lengkap', $request->input('long_notes'));
+        if ($request->has('catatan_lengkap') || $request->has('longNotes') || $request->has('long_notes')) {
+            $data['catatan_lengkap'] = $request->input('catatan_lengkap', $request->input('longNotes', $request->input('long_notes')));
         }
 
         $topic->update($data);
@@ -89,6 +90,19 @@ class ChatController extends Controller
         return response()->json([
             'message' => 'Topik diskusi berhasil diperbarui.',
             'topic' => $topic->fresh(),
+        ]);
+    }
+
+    public function deleteTopic(Request $request, $id)
+    {
+        $topic = ChatTopic::find($id);
+        if ($topic) {
+            $topic->delete();
+        }
+
+        return response()->json([
+            'message' => 'Topik diskusi berhasil dihapus.',
+            'id' => $id,
         ]);
     }
 
@@ -122,23 +136,38 @@ class ChatController extends Controller
 
         $msgId = $request->input('id', 'msg_' . time() . '_' . Str::random(4));
 
-        $message = ChatMessage::create([
-            'id' => $msgId,
-            'topik_id' => $topikId,
-            'pengguna_id' => $user->id,
-            'nama_pengirim' => $user->nama,
-            'foto_pengirim' => $user->foto_profil,
-            'peran_pengirim' => $user->peran,
-            'tipe_kepegawaian' => $user->tipe_kepegawaian,
-            'isi_pesan' => $isi,
-            'waktu_kirim' => date('H:i'),
-            'kanal' => $kanal,
-            'lampiran' => $lampiran,
-        ]);
+        $message = ChatMessage::updateOrCreate(
+            ['id' => $msgId],
+            [
+                'topik_id' => $topikId,
+                'pengguna_id' => $user ? $user->id : $request->input('user_id'),
+                'nama_pengirim' => $user ? $user->nama : $request->input('user_name', 'User'),
+                'foto_pengirim' => $user ? $user->foto_profil : $request->input('user_avatar'),
+                'peran_pengirim' => $user ? $user->peran : ($request->input('user_role', 'EMPLOYEE')),
+                'tipe_kepegawaian' => $user ? $user->tipe_kepegawaian : 'CONTRACT',
+                'isi_pesan' => $isi,
+                'waktu_kirim' => date('H:i'),
+                'kanal' => $kanal,
+                'lampiran' => $lampiran,
+            ]
+        );
 
         return response()->json([
             'message' => 'Pesan terkirim.',
             'chat_message' => $message,
-        ], 201);
+        ], 200);
+    }
+
+    public function deleteMessage(Request $request, $id)
+    {
+        $msg = ChatMessage::find($id);
+        if ($msg) {
+            $msg->delete();
+        }
+
+        return response()->json([
+            'message' => 'Pesan diskusi berhasil dihapus.',
+            'id' => $id,
+        ]);
     }
 }

@@ -176,6 +176,42 @@ class AuthController extends Controller
         ]);
     }
 
+    public function deleteUser(Request $request, $id)
+    {
+        $currentUser = $request->user();
+        if (! $currentUser || ! in_array($currentUser->peran, ['SUPER_ADMIN', 'ADMIN'])) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin/Super Admin yang berhak menghapus karyawan.',
+            ], 403);
+        }
+
+        $user = User::find($id);
+        if (! $user) {
+            return response()->json([
+                'message' => 'User tidak ditemukan.',
+            ], 404);
+        }
+
+        if ($user->id === 'usr_super_admin' || $user->email === 'nasywadavina384@gmail.com' || $user->peran === 'SUPER_ADMIN') {
+            return response()->json([
+                'message' => 'Akun Super Admin tidak dapat dihapus.',
+            ], 403);
+        }
+
+        // Hapus relasi terkait yang tidak memiliki ON DELETE CASCADE otomatis
+        \App\Models\KanbanTask::where('ditugaskan_ke', $id)->delete();
+        \App\Models\ChatTopic::where('dibuat_oleh_id', $id)->delete();
+
+        // Hapus tokens dan user (presensi, pengajuan_izin, logbook_harian, pesan_diskusi cascade otomatis via DB foreign keys)
+        $user->tokens()->delete();
+        $user->delete();
+
+        return response()->json([
+            'message' => 'Karyawan berhasil dihapus dari sistem dan database.',
+            'id' => $id,
+        ], 200);
+    }
+
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();

@@ -80,6 +80,8 @@ class User extends Authenticatable
         'position',
         'avatar',
         'phone',
+        'employment_type',
+        'employmentType',
         'join_date',
         'leave_balance',
         'is_profile_complete',
@@ -98,6 +100,7 @@ class User extends Authenticatable
     public function getPositionAttribute() { return $this->jabatan; }
     public function getAvatarAttribute() { return $this->foto_profil; }
     public function getPhoneAttribute() { return $this->nomor_telepon; }
+    public function getEmploymentTypeAttribute() { return $this->tipe_kepegawaian; }
     public function getJoinDateAttribute() { return $this->tanggal_bergabung; }
     public function getLeaveBalanceAttribute() { return $this->sisa_cuti; }
     public function getIsProfileCompleteAttribute() { return (bool) $this->profil_lengkap; }
