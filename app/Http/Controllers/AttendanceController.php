@@ -56,7 +56,7 @@ class AttendanceController extends Controller
             return response()->json([
                 'message' => 'Anda sudah melakukan presensi hari ini.',
                 'record' => $existing,
-            ], 400);
+            ], 200);
         }
 
         $jamMasuk = $request->input('jam_masuk', $request->input('clock_in_time', date('H:i')));
@@ -69,7 +69,7 @@ class AttendanceController extends Controller
         $mode = $request->input('mode_kerja', $request->input('work_mode', 'WFO'));
         $catatan = $request->input('catatan', $request->input('notes'));
 
-        $recordId = 'att_' . time() . '_' . Str::random(4);
+        $recordId = $request->input('id', 'att_' . time() . '_' . Str::random(4));
 
         $record = AttendanceRecord::create([
             'id' => $recordId,

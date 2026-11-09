@@ -11,7 +11,7 @@ class ChatController extends Controller
 {
     public function getTopics(Request $request)
     {
-        $topics = ChatTopic::withCount('messages')
+        $topics = ChatTopic::with('messages')
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -115,12 +115,12 @@ class ChatController extends Controller
     {
         $user = $request->user();
 
-        $isi = $request->input('isi_pesan', $request->input('content'));
+        $isi = $request->input('isi_pesan', $request->input('content', $request->input('notes', '')));
         $topikId = $request->input('topik_id', $request->input('topic_id'));
         $kanal = $request->input('kanal', $request->input('channel_id', 'general'));
         $lampiran = $request->input('lampiran', $request->input('attachments', []));
 
-        $msgId = 'msg_' . time() . '_' . Str::random(4);
+        $msgId = $request->input('id', 'msg_' . time() . '_' . Str::random(4));
 
         $message = ChatMessage::create([
             'id' => $msgId,

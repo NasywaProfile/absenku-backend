@@ -50,6 +50,7 @@ class ChatTopic extends Model
         'created_by',
         'created_by_name',
         'created_by_avatar',
+        'comments',
     ];
 
     public function getTitleAttribute() { return $this->judul_topik; }
@@ -63,6 +64,24 @@ class ChatTopic extends Model
     public function getCreatedByAttribute() { return $this->dibuat_oleh_id; }
     public function getCreatedByNameAttribute() { return $this->dibuat_oleh_nama; }
     public function getCreatedByAvatarAttribute() { return $this->dibuat_oleh_foto; }
+
+    public function getCommentsAttribute()
+    {
+        return $this->messages->map(function ($msg) {
+            return [
+                'id' => $msg->id,
+                'topicId' => $msg->topik_id,
+                'userId' => $msg->pengguna_id,
+                'userName' => $msg->nama_pengirim,
+                'userAvatar' => $msg->foto_pengirim,
+                'userRole' => $msg->peran_pengirim,
+                'notes' => $msg->isi_pesan,
+                'timestamp' => $msg->waktu_kirim,
+                'attachments' => $msg->lampiran ?? [],
+                'type' => 'COMMENT',
+            ];
+        });
+    }
 
     public function messages()
     {

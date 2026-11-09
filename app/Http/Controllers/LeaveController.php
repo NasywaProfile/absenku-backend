@@ -42,7 +42,7 @@ class LeaveController extends Controller
         $dataLampiran = $request->input('data_lampiran', $request->input('attachment_data'));
         $tipeLampiran = $request->input('tipe_lampiran', $request->input('attachment_type'));
 
-        $leaveId = 'lve_' . time() . '_' . Str::random(4);
+        $leaveId = $request->input('id', 'lve_' . time() . '_' . Str::random(4));
 
         $leave = LeaveRequest::create([
             'id' => $leaveId,
