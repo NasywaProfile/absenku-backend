@@ -12,6 +12,9 @@ use Illuminate\Support\Facades\Route;
 // Public Routes
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::get('/login', function () {
+    return response()->json(['message' => 'Unauthenticated.'], 401);
+})->name('login');
 Route::get('/office-config', [OfficeConfigController::class, 'show']);
 Route::get('/user-status', [AuthController::class, 'checkUserStatus']);
 Route::get('/kanban-tasks', [TaskController::class, 'getKanbanTasks']);
@@ -68,19 +71,4 @@ Route::middleware('auth:sanctum')->group(function () {
     // Daily Task Logs
     Route::get('/daily-logs', [TaskController::class, 'getDailyLogs']);
     Route::post('/daily-logs', [TaskController::class, 'saveDailyLog']);
-
-    // Kanban Tasks
-    Route::get('/kanban-tasks', [TaskController::class, 'getKanbanTasks']);
-    Route::post('/kanban-tasks', [TaskController::class, 'storeKanbanTask']);
-    Route::put('/kanban-tasks/{id}', [TaskController::class, 'updateKanbanTask']);
-    Route::delete('/kanban-tasks/{id}', [TaskController::class, 'deleteKanbanTask']);
-
-    // Chat Rooms & Topics
-    Route::get('/chat/topics', [ChatController::class, 'getTopics']);
-    Route::post('/chat/topics', [ChatController::class, 'storeTopic']);
-    Route::put('/chat/topics/{id}', [ChatController::class, 'updateTopic']);
-    Route::delete('/chat/topics/{id}', [ChatController::class, 'deleteTopic']);
-    Route::get('/chat/messages', [ChatController::class, 'getMessages']);
-    Route::post('/chat/messages', [ChatController::class, 'sendMessage']);
-    Route::delete('/chat/messages/{id}', [ChatController::class, 'deleteMessage']);
 });
