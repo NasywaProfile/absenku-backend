@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
@@ -143,7 +144,7 @@ class AuthController extends Controller
 
     public function getUsers(Request $request)
     {
-        $users = User::orderBy('nama')->get();
+        $users = User::where('status', '!=', 'REJECTED')->orderBy('nama')->get();
         return response()->json($users);
     }
 
@@ -164,11 +165,13 @@ class AuthController extends Controller
     {
         $reason = $request->input('alasan', $request->input('reason'));
 
-        $user = User::findOrFail($id);
-        $user->update([
-            'status' => 'REJECTED',
-            'alasan_penolakan' => $reason,
-        ]);
+        $user = User::where('id', $id)->orWhere('email', $id)->first();
+        if ($user) {
+            $user->update([
+                'status' => 'REJECTED',
+                'alasan_penolakan' => $reason,
+            ]);
+        }
 
         return response()->json([
             'message' => 'Pendaftaran karyawan telah ditolak.',
@@ -179,37 +182,79 @@ class AuthController extends Controller
     public function deleteUser(Request $request, $id)
     {
         $currentUser = $request->user();
-        if (! $currentUser || ! in_array($currentUser->peran, ['SUPER_ADMIN', 'ADMIN'])) {
+        $userRole = $currentUser ? strtoupper($currentUser->peran) : '';
+        if (! $currentUser || ! in_array($userRole, ['SUPER_ADMIN', 'ADMIN'])) {
             return response()->json([
                 'message' => 'Unauthorized. Hanya Admin/Super Admin yang berhak menghapus karyawan.',
             ], 403);
         }
 
-        $user = User::find($id);
+        // Cari user berdasarkan ID ataupun Email
+        $user = User::where('id', $id)->orWhere('email', $id)->first();
         if (! $user) {
+            // Jika user sudah tidak ada di database, anggap berhasil agar sinkron
             return response()->json([
-                'message' => 'User tidak ditemukan.',
-            ], 404);
+                'message' => 'User sudah tidak ada di sistem database.',
+                'id' => $id,
+            ], 200);
         }
 
-        if ($user->id === 'usr_super_admin' || $user->email === 'nasywadavina384@gmail.com' || $user->peran === 'SUPER_ADMIN') {
+        if ($user->id === 'usr_super_admin' || $user->email === 'nasywadavina384@gmail.com' || strtoupper($user->peran) === 'SUPER_ADMIN') {
             return response()->json([
-                'message' => 'Akun Super Admin tidak dapat dihapus.',
+                'message' => 'Akun Super Admin utama tidak dapat dihapus.',
             ], 403);
         }
 
-        // Hapus relasi terkait yang tidak memiliki ON DELETE CASCADE otomatis
-        \App\Models\KanbanTask::where('ditugaskan_ke', $id)->delete();
-        \App\Models\ChatTopic::where('dibuat_oleh_id', $id)->delete();
+        try {
+            DB::beginTransaction();
 
-        // Hapus tokens dan user (presensi, pengajuan_izin, logbook_harian, pesan_diskusi cascade otomatis via DB foreign keys)
-        $user->tokens()->delete();
-        $user->delete();
+            $targetId = $user->id;
 
-        return response()->json([
-            'message' => 'Karyawan berhasil dihapus dari sistem dan database.',
-            'id' => $id,
-        ], 200);
+            // 1. Bersihkan tugas proyek (baik ditugaskan ke maupun dibuat oleh user ini)
+            DB::table('tugas_proyek')
+                ->where('ditugaskan_ke', $targetId)
+                ->orWhere('dibuat_oleh', $targetId)
+                ->delete();
+
+            // 2. Bersihkan pesan obrolan di topik yang dibuat oleh user ini, lalu hapus topiknya
+            $userTopicIds = DB::table('topik_diskusi')->where('dibuat_oleh_id', $targetId)->pluck('id');
+            if ($userTopicIds->isNotEmpty()) {
+                DB::table('pesan_diskusi')->whereIn('topik_id', $userTopicIds)->delete();
+                DB::table('topik_diskusi')->whereIn('id', $userTopicIds)->delete();
+            }
+
+            // 3. Bersihkan seluruh pesan obrolan yang pernah dikirim oleh user ini
+            DB::table('pesan_diskusi')->where('pengguna_id', $targetId)->delete();
+
+            // 4. Bersihkan logbook harian
+            DB::table('logbook_harian')->where('pengguna_id', $targetId)->delete();
+
+            // 5. Bersihkan pengajuan izin
+            DB::table('pengajuan_izin')->where('pengguna_id', $targetId)->delete();
+
+            // 6. Bersihkan riwayat presensi
+            DB::table('presensi')->where('pengguna_id', $targetId)->delete();
+
+            // 7. Bersihkan personal access tokens (Sanctum)
+            DB::table('personal_access_tokens')
+                ->where('tokenable_id', $targetId)
+                ->delete();
+
+            // 8. Hapus entri karyawan dari tabel pengguna
+            DB::table('pengguna')->where('id', $targetId)->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Karyawan berhasil dihapus dari sistem dan database.',
+                'id' => $targetId,
+            ], 200);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Gagal menghapus karyawan: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function logout(Request $request)
