@@ -64,7 +64,16 @@ class ChatTopic extends Model
 
     public function getTitleAttribute() { return $this->judul_topik; }
     public function getStatusAttribute() { return $this->status_topik; }
-    public function getTaggedTeammateIdsAttribute() { return $this->id_anggota_ditandai ?? []; }
+    public function getTaggedTeammateIdsAttribute()
+    {
+        $val = $this->id_anggota_ditandai;
+        if (is_string($val)) {
+            $decoded = json_decode($val, true);
+            if (is_array($decoded)) return $decoded;
+            return array_values(array_filter(array_map('trim', explode(',', $val))));
+        }
+        return is_array($val) ? array_values($val) : [];
+    }
     public function getFilesAttribute() { return $this->berkas ?? []; }
     public function getLinksAttribute() { return $this->tautan ?? []; }
     public function getImagesAttribute() { return $this->gambar ?? []; }
