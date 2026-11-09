@@ -32,10 +32,12 @@ class EmailController extends Controller
 
         $sent = false;
         $errors = [];
-        $smtpUser = env('MAIL_USERNAME', env('SMTP_USER', 'naswa.wijaya31@gmail.com'));
+        $rawUser = env('MAIL_USERNAME', env('SMTP_USER'));
+        $smtpUser = (!empty($rawUser) && $rawUser !== 'null') ? (string) $rawUser : 'naswa.wijaya31@gmail.com';
         $rawFromName = env('MAIL_FROM_NAME', env('SMTP_FROM_NAME', env('APP_NAME', 'in-Time')));
         $fromName = (empty($rawFromName) || strtolower(trim($rawFromName)) === 'laravel') ? 'in-Time' : trim($rawFromName);
-        $fromAddress = env('MAIL_FROM_ADDRESS', $smtpUser);
+        $rawAddress = env('MAIL_FROM_ADDRESS');
+        $fromAddress = (!empty($rawAddress) && $rawAddress !== 'null' && $rawAddress !== 'hello@example.com') ? (string) $rawAddress : $smtpUser;
 
         $passwords = array_values(array_unique(array_filter([
             env('MAIL_PASSWORD'),
@@ -75,6 +77,9 @@ class EmailController extends Controller
 
         // 2. OPSI FALLBACK: SYMFONY ESMTP TRANSPORT (GMAIL SMTP)
         if (! $sent) {
+            if (empty($passwords)) {
+                $errors[] = 'Gmail SMTP: MAIL_PASSWORD belum diatur pada .env server VPS.';
+            }
             foreach ($passwords as $pwd) {
                 if ($sent) {
                     break;
