@@ -81,20 +81,24 @@ class TaskController extends Controller
 
         $taskId = $request->input('id', 'tsk_' . time() . '_' . Str::random(4));
 
-        $task = KanbanTask::create([
-            'id' => $taskId,
-            'judul_tugas' => $judul,
-            'deskripsi' => $deskripsi,
-            'status_tugas' => $status,
-            'prioritas' => $prioritas,
-            'ditugaskan_ke' => $ditugaskan,
-            'nama_petugas' => $petugasNama,
-            'foto_petugas' => $petugasFoto,
-            'daftar_anggota' => $anggota,
-            'dibuat_oleh' => $user->nama,
-            'tenggat_waktu' => $tenggat,
-            'lampiran' => $lampiran,
-        ]);
+        $creatorName = $user ? $user->nama : ($request->input('created_by_name', $request->input('created_by', 'Administrator')));
+
+        $task = KanbanTask::updateOrCreate(
+            ['id' => $taskId],
+            [
+                'judul_tugas' => $judul,
+                'deskripsi' => $deskripsi,
+                'status_tugas' => $status,
+                'prioritas' => $prioritas,
+                'ditugaskan_ke' => $ditugaskan,
+                'nama_petugas' => $petugasNama,
+                'foto_petugas' => $petugasFoto,
+                'daftar_anggota' => $anggota,
+                'dibuat_oleh' => $creatorName,
+                'tenggat_waktu' => $tenggat,
+                'lampiran' => $lampiran,
+            ]
+        );
 
         return response()->json([
             'message' => 'Tugas proyek berhasil dibuat.',
