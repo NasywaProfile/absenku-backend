@@ -7,9 +7,12 @@ use App\Http\Controllers\TaskController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\EmailController;
 use App\Http\Controllers\OfficeConfigController;
+use App\Http\Controllers\UploadController;
 use Illuminate\Support\Facades\Route;
 
 // Public Routes
+Route::post('/upload', [UploadController::class, 'upload']);
+Route::post('/upload/document', [UploadController::class, 'upload']);
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/login', function () {
