@@ -79,7 +79,7 @@ class TaskController extends Controller
         $tenggat = $request->input('tenggat_waktu', $request->input('due_date'));
         $lampiran = $request->input('lampiran', $request->input('attachments', []));
 
-        $taskId = 'tsk_' . time() . '_' . Str::random(4);
+        $taskId = $request->input('id', 'tsk_' . time() . '_' . Str::random(4));
 
         $task = KanbanTask::create([
             'id' => $taskId,

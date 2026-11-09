@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AttendanceRecord;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -13,7 +14,8 @@ class AttendanceController extends Controller
         $user = $request->user();
         $query = AttendanceRecord::query();
 
-        if (! in_array($user->peran, ['SUPER_ADMIN', 'ADMIN'])) {
+        $role = strtoupper($user->peran ?? '');
+        if (! in_array($role, ['SUPER_ADMIN', 'ADMIN'])) {
             $query->where('pengguna_id', $user->id);
         } elseif ($request->has('user_id') || $request->has('pengguna_id')) {
             $targetId = $request->input('user_id', $request->input('pengguna_id'));
@@ -45,19 +47,18 @@ class AttendanceController extends Controller
     public function store(Request $request)
     {
         $user = $request->user();
-        $today = date('Y-m-d');
+        $role = strtoupper($user->peran ?? '');
+        $today = $request->input('date', $request->input('tanggal', date('Y-m-d')));
 
-        // Cegah presensi ganda di hari yang sama
-        $existing = AttendanceRecord::where('pengguna_id', $user->id)
-            ->where('tanggal', $today)
-            ->first();
+        $targetUserId = ($user && in_array($role, ['SUPER_ADMIN', 'ADMIN']) && ($request->has('user_id') || $request->has('pengguna_id')))
+            ? $request->input('user_id', $request->input('pengguna_id'))
+            : $user->id;
 
-        if ($existing) {
-            return response()->json([
-                'message' => 'Anda sudah melakukan presensi hari ini.',
-                'record' => $existing,
-            ], 200);
-        }
+        $targetUser = $targetUserId === $user->id ? $user : User::find($targetUserId);
+        $namaKaryawan = $targetUser ? $targetUser->nama : $user->nama;
+        $fotoKaryawan = $targetUser ? $targetUser->foto_profil : $user->foto_profil;
+        $divisi = $targetUser ? $targetUser->divisi : $user->divisi;
+        $tipe = $targetUser ? $targetUser->tipe_kepegawaian : $user->tipe_kepegawaian;
 
         $jamMasuk = $request->input('jam_masuk', $request->input('clock_in_time', date('H:i')));
         $lat = $request->input('latitude', $request->input('clock_in_lat'));
@@ -71,29 +72,33 @@ class AttendanceController extends Controller
 
         $recordId = $request->input('id', 'att_' . time() . '_' . Str::random(4));
 
-        $record = AttendanceRecord::create([
-            'id' => $recordId,
-            'pengguna_id' => $user->id,
-            'nama_karyawan' => $user->nama,
-            'foto_karyawan' => $user->foto_profil,
-            'divisi' => $user->divisi,
-            'tipe_kepegawaian' => $user->tipe_kepegawaian,
-            'tanggal' => $today,
-            'jam_masuk' => $jamMasuk,
-            'latitude' => $lat,
-            'longitude' => $lng,
-            'jarak_meter' => $jarak,
-            'status_lokasi' => $statusLokasi,
-            'status_kehadiran' => $statusHadir,
-            'menit_keterlambatan' => $menitTerlambat,
-            'mode_kerja' => $mode,
-            'catatan' => $catatan,
-            'status_sinkronisasi' => 'SYNCED',
-        ]);
+        $record = AttendanceRecord::updateOrCreate(
+            [
+                'pengguna_id' => $targetUserId,
+                'tanggal' => $today,
+            ],
+            [
+                'id' => $recordId,
+                'nama_karyawan' => $namaKaryawan,
+                'foto_karyawan' => $fotoKaryawan,
+                'divisi' => $divisi,
+                'tipe_kepegawaian' => $tipe,
+                'jam_masuk' => $jamMasuk,
+                'latitude' => $lat,
+                'longitude' => $lng,
+                'jarak_meter' => $jarak,
+                'status_lokasi' => $statusLokasi,
+                'status_kehadiran' => $statusHadir,
+                'menit_keterlambatan' => $menitTerlambat,
+                'mode_kerja' => $mode,
+                'catatan' => $catatan,
+                'status_sinkronisasi' => 'SYNCED',
+            ]
+        );
 
         return response()->json([
             'message' => 'Presensi berhasil dicatat.',
             'record' => $record,
-        ], 201);
+        ], 200);
     }
 }

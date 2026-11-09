@@ -15,7 +15,8 @@ class LeaveController extends Controller
         $user = $request->user();
         $query = LeaveRequest::query();
 
-        if (! in_array($user->peran, ['SUPER_ADMIN', 'ADMIN'])) {
+        $role = strtoupper($user->peran ?? '');
+        if (! in_array($role, ['SUPER_ADMIN', 'ADMIN'])) {
             $query->where('pengguna_id', $user->id);
         }
 
@@ -41,6 +42,20 @@ class LeaveController extends Controller
         $namaLampiran = $request->input('nama_lampiran', $request->input('attachment_name'));
         $dataLampiran = $request->input('data_lampiran', $request->input('attachment_data'));
         $tipeLampiran = $request->input('tipe_lampiran', $request->input('attachment_type'));
+
+        // Cek dan cegah duplikasi perizinan yang sama persis
+        $existing = LeaveRequest::where('pengguna_id', $user->id)
+            ->where('tanggal_mulai', $tglMulai)
+            ->where('tanggal_selesai', $tglSelesai)
+            ->where('kategori_izin', $kategori)
+            ->first();
+
+        if ($existing) {
+            return response()->json([
+                'message' => 'Pengajuan sudah terdaftar.',
+                'leave' => $existing,
+            ], 200);
+        }
 
         $leaveId = $request->input('id', 'lve_' . time() . '_' . Str::random(4));
 
