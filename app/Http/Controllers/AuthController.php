@@ -56,9 +56,12 @@ class AuthController extends Controller
             ]
         );
 
+        $token = $user->createToken('auth-token')->plainTextToken;
+
         return response()->json([
-            'message' => 'Pendaftaran berhasil. Akun Anda sedang menunggu persetujuan Super Admin.',
+            'message' => 'Pendaftaran berhasil. Silakan lengkapi biodata diri Anda.',
             'user' => $user,
+            'token' => $token,
         ], 201);
     }
 
@@ -187,11 +190,47 @@ class AuthController extends Controller
         return response()->json($users);
     }
 
+    public function checkUserStatus(Request $request)
+    {
+        $id = $request->query('id');
+        $email = $request->query('email');
+
+        $user = null;
+        if ($id) {
+            $user = User::where('id', $id)->first();
+        }
+        if (! $user && $email) {
+            $user = User::where('email', $email)->first();
+        }
+        if (! $user && $request->user()) {
+            $user = $request->user();
+        }
+
+        if (! $user) {
+            return response()->json(['message' => 'Pengguna tidak ditemukan.'], 404);
+        }
+
+        return response()->json([
+            'id' => $user->id,
+            'name' => $user->nama,
+            'email' => $user->email,
+            'status' => $user->status,
+            'role' => $user->peran,
+            'profil_lengkap' => (bool) $user->profil_lengkap,
+            'user' => $user,
+        ]);
+    }
+
     public function approveUser(Request $request, $id)
     {
-        $user = User::findOrFail($id);
+        $user = User::where('id', $id)->orWhere('email', $id)->first();
+        if (! $user) {
+            return response()->json(['message' => 'User tidak ditemukan.'], 404);
+        }
+
         $user->update([
             'status' => 'ACTIVE',
+            'profil_lengkap' => true,
         ]);
 
         return response()->json([
