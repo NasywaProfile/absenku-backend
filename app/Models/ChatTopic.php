@@ -84,6 +84,11 @@ class ChatTopic extends Model
     public function getCreatedByAvatarAttribute() { return $this->dibuat_oleh_foto; }
     public function getCreatedAtAttribute() { return $this->attributes['created_at'] ?? ''; }
     public function getUpdatedAtAttribute() { return $this->attributes['updated_at'] ?? ''; }
+    public function getCreatedAtFormattedAttribute()
+    {
+        $createdAt = $this->attributes['created_at'] ?? null;
+        return $createdAt ? date('Y-m-d H:i', strtotime($createdAt)) : '';
+    }
 
     public function getCommentsAttribute()
     {
