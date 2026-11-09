@@ -16,6 +16,7 @@ Route::get('/office-config', [OfficeConfigController::class, 'show']);
 Route::get('/user-status', [AuthController::class, 'checkUserStatus']);
 Route::match(['put', 'post'], '/profile/direct', [AuthController::class, 'updateProfile']);
 Route::post('/send-email', [EmailController::class, 'sendEmail']);
+Route::get('/test-email', [EmailController::class, 'testEmail']);
 
 // Authenticated Routes (Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
