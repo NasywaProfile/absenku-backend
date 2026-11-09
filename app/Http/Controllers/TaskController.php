@@ -152,11 +152,13 @@ class TaskController extends Controller
 
     public function deleteKanbanTask(Request $request, $id)
     {
-        $task = KanbanTask::findOrFail($id);
-        $task->delete();
+        $task = KanbanTask::find($id);
+        if ($task) {
+            $task->delete();
+        }
 
         return response()->json([
             'message' => 'Tugas proyek berhasil dihapus.',
-        ]);
+        ], 200);
     }
 }
