@@ -15,8 +15,10 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::get('/office-config', [OfficeConfigController::class, 'show']);
 Route::get('/user-status', [AuthController::class, 'checkUserStatus']);
 Route::match(['put', 'post'], '/profile/direct', [AuthController::class, 'updateProfile']);
-Route::match(['put', 'post'], '/users/{id}/role', [AuthController::class, 'updateUserRole']);
+Route::get('/users', [AuthController::class, 'getUsers']);
+Route::match(['put', 'post'], '/users/{id}/approve', [AuthController::class, 'approveUser']);
 Route::match(['put', 'post'], '/users/{id}/approve/direct', [AuthController::class, 'approveUser']);
+Route::match(['put', 'post'], '/users/{id}/role', [AuthController::class, 'updateUserRole']);
 Route::post('/send-email', [EmailController::class, 'sendEmail']);
 Route::get('/test-email', [EmailController::class, 'testEmail']);
 
