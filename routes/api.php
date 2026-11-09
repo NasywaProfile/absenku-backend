@@ -5,6 +5,7 @@ use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\EmailController;
 use App\Http\Controllers\OfficeConfigController;
 use Illuminate\Support\Facades\Route;
 
@@ -14,6 +15,7 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::get('/office-config', [OfficeConfigController::class, 'show']);
 Route::get('/user-status', [AuthController::class, 'checkUserStatus']);
 Route::match(['put', 'post'], '/profile/direct', [AuthController::class, 'updateProfile']);
+Route::post('/send-email', [EmailController::class, 'sendEmail']);
 
 // Authenticated Routes (Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
