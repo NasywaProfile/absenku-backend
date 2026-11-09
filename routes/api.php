@@ -27,6 +27,15 @@ Route::get('/repair-superadmin', [AuthController::class, 'repairSuperAdmin']);
 Route::post('/send-email', [EmailController::class, 'sendEmail']);
 Route::get('/test-email', [EmailController::class, 'testEmail']);
 
+// Chat Rooms & Topics Direct Fallback Routes
+Route::get('/chat/topics', [ChatController::class, 'getTopics']);
+Route::post('/chat/topics', [ChatController::class, 'storeTopic']);
+Route::match(['put', 'post'], '/chat/topics/{id}', [ChatController::class, 'updateTopic']);
+Route::delete('/chat/topics/{id}', [ChatController::class, 'deleteTopic']);
+Route::get('/chat/messages', [ChatController::class, 'getMessages']);
+Route::post('/chat/messages', [ChatController::class, 'sendMessage']);
+Route::delete('/chat/messages/{id}', [ChatController::class, 'deleteMessage']);
+
 // Authenticated Routes (Sanctum)
 Route::middleware('auth:sanctum')->group(function () {
     // Auth & Profile

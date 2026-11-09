@@ -258,7 +258,13 @@ class AuthController extends Controller
 
     public function approveUser(Request $request, $id)
     {
-        $user = User::where('id', $id)->orWhere('email', $id)->first();
+        $email = $request->input('email', $request->json('email'));
+        $user = User::where('id', $id)
+            ->orWhere('email', $id)
+            ->when($email, function ($query) use ($email) {
+                return $query->orWhere('email', $email);
+            })
+            ->first();
         if (! $user) {
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
@@ -335,7 +341,13 @@ class AuthController extends Controller
 
     public function updateUserRole(Request $request, $id)
     {
-        $user = User::where('id', $id)->orWhere('email', $id)->first();
+        $email = $request->input('email', $request->json('email'));
+        $user = User::where('id', $id)
+            ->orWhere('email', $id)
+            ->when($email, function ($query) use ($email) {
+                return $query->orWhere('email', $email);
+            })
+            ->first();
         if (! $user) {
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
