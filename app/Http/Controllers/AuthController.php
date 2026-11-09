@@ -233,13 +233,16 @@ class AuthController extends Controller
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
 
+        $targetRole = $request->input('role', $request->input('peran', $request->json('role', $request->json('peran', 'EMPLOYEE'))));
+        if (! in_array($targetRole, ['SUPER_ADMIN', 'ADMIN', 'EMPLOYEE'])) {
+            $targetRole = 'EMPLOYEE';
+        }
+
         $updateData = [
             'status' => 'ACTIVE',
             'profil_lengkap' => true,
+            'peran' => $targetRole,
         ];
-        if ($request->has('role') || $request->has('peran')) {
-            $updateData['peran'] = $request->input('role', $request->input('peran'));
-        }
 
         $user->update($updateData);
 
@@ -297,6 +300,26 @@ class AuthController extends Controller
         return response()->json([
             'message' => 'Pendaftaran karyawan telah ditolak.',
             'user' => $user,
+        ]);
+    }
+
+    public function updateUserRole(Request $request, $id)
+    {
+        $user = User::where('id', $id)->orWhere('email', $id)->first();
+        if (! $user) {
+            return response()->json(['message' => 'User tidak ditemukan.'], 404);
+        }
+
+        $newRole = $request->input('role', $request->input('peran', $request->json('role', $request->json('peran'))));
+        if (! in_array($newRole, ['SUPER_ADMIN', 'ADMIN', 'EMPLOYEE'])) {
+            return response()->json(['message' => 'Role tidak valid.'], 422);
+        }
+
+        $user->update(['peran' => $newRole]);
+
+        return response()->json([
+            'message' => "Peran akun {$user->nama} berhasil diubah menjadi {$newRole}.",
+            'user' => $user->fresh(),
         ]);
     }
 
