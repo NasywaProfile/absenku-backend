@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Route;
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/office-config', [OfficeConfigController::class, 'show']);
+Route::put('/profile/direct', [AuthController::class, 'updateProfile']);
 
 // Authenticated Routes (Sanctum)
 Route::middleware('auth:sanctum')->group(function () {

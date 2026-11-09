@@ -64,7 +64,6 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'password' => 'hashed',
             'profil_lengkap' => 'boolean',
             'sisa_cuti' => 'integer',
         ];

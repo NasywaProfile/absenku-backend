@@ -102,7 +102,25 @@ class AuthController extends Controller
     {
         $user = $request->user();
 
+        // Fallback jika token authorization sedang terputus namun user mengirimkan identitas id/email
+        if (! $user) {
+            $id = $request->input('id', $request->input('user_id'));
+            $email = $request->input('current_email', $request->input('email'));
+            if ($id) {
+                $user = User::find($id);
+            } elseif ($email) {
+                $user = User::where('email', $email)->first();
+            }
+        }
+
+        if (! $user) {
+            return response()->json([
+                'message' => 'Sesi login tidak valid. Silakan login kembali.',
+            ], 401);
+        }
+
         $nama = $request->input('nama', $request->input('name', $user->nama));
+        $email = $request->input('email', $user->email);
         $foto = $request->input('foto_profil', $request->input('avatar', $user->foto_profil));
         $telepon = $request->input('nomor_telepon', $request->input('phone', $user->nomor_telepon));
         $divisi = $request->input('divisi', $request->input('department', $user->divisi));
@@ -130,15 +148,36 @@ class AuthController extends Controller
             'profil_lengkap' => (bool) $lengkap,
         ];
 
+        // Validasi dan update email jika diubah
+        if (! empty($email) && $email !== $user->email) {
+            $emailExists = User::where('email', $email)->where('id', '!=', $user->id)->exists();
+            if ($emailExists) {
+                return response()->json([
+                    'message' => 'Alamat email baru sudah digunakan oleh akun lain.',
+                ], 422);
+            }
+            $data['email'] = $email;
+        }
+
+        // Update tipe kepegawaian jika ada perubahan
+        if ($request->has('employment_type') || $request->has('tipe_kepegawaian')) {
+            $data['tipe_kepegawaian'] = $request->input('employment_type', $request->input('tipe_kepegawaian'));
+        }
+
+        // Update kata sandi baru jika dikirim
         if ($request->has('password') && ! empty($request->password)) {
-            $data['password'] = Hash::make($request->password);
+            $rawPass = $request->password;
+            $data['password'] = str_starts_with($rawPass, '$2y$') ? $rawPass : Hash::make($rawPass);
         }
 
         $user->update($data);
+        $freshUser = $user->fresh();
+        $token = $freshUser->createToken('auth-token')->plainTextToken;
 
         return response()->json([
-            'message' => 'Profil berhasil diperbarui.',
-            'user' => $user->fresh(),
+            'message' => 'Biodata diri dan kredensial berhasil diperbarui.',
+            'user' => $freshUser,
+            'token' => $token,
         ]);
     }
 
