@@ -365,6 +365,28 @@ class AuthController extends Controller
         ]);
     }
 
+    public function updateEmploymentType(Request $request, $id)
+    {
+        $email = $request->input('email', $request->json('email'));
+        $user = User::where('id', $id)
+            ->orWhere('email', $id)
+            ->when($email, function ($query) use ($email) {
+                return $query->orWhere('email', $email);
+            })
+            ->first();
+        if (! $user) {
+            return response()->json(['message' => 'User tidak ditemukan.'], 404);
+        }
+
+        $newType = $request->input('employment_type', $request->input('tipe_kepegawaian', $request->json('employment_type', $request->json('tipe_kepegawaian', 'CONTRACT'))));
+        $user->update(['tipe_kepegawaian' => $newType]);
+
+        return response()->json([
+            'message' => "Tipe kepegawaian {$user->nama} berhasil diubah menjadi {$newType}.",
+            'user' => $user->fresh(),
+        ]);
+    }
+
     public function repairSuperAdmin()
     {
         $sa = User::updateOrCreate(

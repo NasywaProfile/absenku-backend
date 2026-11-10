@@ -12,14 +12,13 @@ class TaskController extends Controller
     // ================= Logbook Harian =================
     public function getDailyLogs(Request $request)
     {
-        $user = $request->user();
         $query = DailyTaskLog::query();
 
+        // Jika ada filter spesifik user_id, tampilkan milik user tersebut
+        // Jika tidak ada, kembalikan semua logbook harian agar semua akun dapat saling melihat
         if ($request->has('user_id') || $request->has('pengguna_id')) {
             $targetId = $request->input('user_id', $request->input('pengguna_id'));
             $query->where('pengguna_id', $targetId);
-        } else {
-            $query->where('pengguna_id', $user->id);
         }
 
         if ($request->has('date') || $request->has('tanggal')) {

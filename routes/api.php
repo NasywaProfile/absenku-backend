@@ -29,6 +29,11 @@ Route::get('/users', [AuthController::class, 'getUsers']);
 Route::match(['put', 'post'], '/users/{id}/approve', [AuthController::class, 'approveUser']);
 Route::match(['put', 'post'], '/users/{id}/approve/direct', [AuthController::class, 'approveUser']);
 Route::match(['put', 'post'], '/users/{id}/role', [AuthController::class, 'updateUserRole']);
+Route::match(['put', 'post'], '/users/{id}/employment-type', [AuthController::class, 'updateEmploymentType']);
+Route::get('/daily-logs', [TaskController::class, 'getDailyLogs']);
+Route::post('/daily-logs', [TaskController::class, 'saveDailyLog']);
+Route::delete('/attendance', [AttendanceController::class, 'destroy']);
+Route::delete('/attendance/today', [AttendanceController::class, 'destroy']);
 Route::get('/repair-superadmin', [AuthController::class, 'repairSuperAdmin']);
 Route::post('/send-email', [EmailController::class, 'sendEmail']);
 Route::get('/test-email', [EmailController::class, 'testEmail']);
@@ -53,6 +58,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/users', [AuthController::class, 'getUsers']);
     Route::post('/users/{id}/approve', [AuthController::class, 'approveUser']);
     Route::match(['put', 'post'], '/users/{id}/role', [AuthController::class, 'updateUserRole']);
+    Route::match(['put', 'post'], '/users/{id}/employment-type', [AuthController::class, 'updateEmploymentType']);
     Route::post('/users/{id}/reject', [AuthController::class, 'rejectUser']);
     Route::delete('/users/{id}', [AuthController::class, 'deleteUser']);
 
@@ -63,6 +69,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/attendance', [AttendanceController::class, 'index']);
     Route::get('/attendance/today', [AttendanceController::class, 'today']);
     Route::post('/attendance', [AttendanceController::class, 'store']);
+    Route::delete('/attendance', [AttendanceController::class, 'destroy']);
+    Route::delete('/attendance/today', [AttendanceController::class, 'destroy']);
 
     // Leave / Cuti / Izin / WFH / Dinas
     Route::get('/leaves', [LeaveController::class, 'index']);
