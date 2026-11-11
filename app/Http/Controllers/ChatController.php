@@ -43,9 +43,9 @@ class ChatController extends Controller
                 'gambar' => $gambar,
                 'catatan_singkat' => $catatanSingkat,
                 'catatan_lengkap' => $catatanLengkap,
-                'dibuat_oleh_id' => $user ? $user->id : $request->input('createdBy', $request->input('authorId', 'usr_super_admin')),
-                'dibuat_oleh_nama' => $user ? $user->nama : $request->input('createdByName', $request->input('authorName', 'Administrator')),
-                'dibuat_oleh_foto' => $user ? $user->foto_profil : $request->input('createdByAvatar', $request->input('authorAvatar', '')),
+                'dibuat_oleh_id' => $user->id,
+                'dibuat_oleh_nama' => $user->nama,
+                'dibuat_oleh_foto' => $user->foto_profil ?? '',
             ]
         );
 
@@ -57,7 +57,14 @@ class ChatController extends Controller
 
     public function updateTopic(Request $request, $id)
     {
+        $user = $request->user();
+        $role = strtoupper((string) ($user->peran ?? ''));
+        $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
+
         $topic = ChatTopic::findOrFail($id);
+        if (! $isAdmin && $topic->dibuat_oleh_id !== $user->id) {
+            return response()->json(['message' => 'Anda tidak berhak mengubah topik diskusi milik pengguna lain.'], 403);
+        }
 
         $data = [];
         if ($request->has('judul_topik') || $request->has('title')) {
@@ -95,8 +102,15 @@ class ChatController extends Controller
 
     public function deleteTopic(Request $request, $id)
     {
+        $user = $request->user();
+        $role = strtoupper((string) ($user->peran ?? ''));
+        $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
+
         $topic = ChatTopic::find($id);
         if ($topic) {
+            if (! $isAdmin && $topic->dibuat_oleh_id !== $user->id) {
+                return response()->json(['message' => 'Anda tidak berhak menghapus topik diskusi milik pengguna lain.'], 403);
+            }
             $topic->delete();
         }
 
@@ -137,25 +151,17 @@ class ChatController extends Controller
         $msgId = $request->input('id', 'msg_' . time() . '_' . Str::random(4));
 
         try {
-            $penggunaId = $user ? $user->id : $request->input('user_id');
-            // Pastikan pengguna_id ada di database agar tidak gagal foreign key
-            $userExists = \App\Models\User::where('id', $penggunaId)->exists();
-            if (!$userExists) {
-                $firstUser = \App\Models\User::first();
-                if ($firstUser) {
-                    $penggunaId = $firstUser->id;
-                }
-            }
+            $penggunaId = $user->id;
 
             // Pastikan topik_id ada di database agar tidak gagal foreign key
             if ($topikId) {
                 $topicExists = \App\Models\ChatTopic::where('id', $topikId)->exists();
-                if (!$topicExists) {
+                if (! $topicExists) {
                     \App\Models\ChatTopic::create([
                         'id' => $topikId,
                         'judul_topik' => 'Topik Obrolan',
                         'dibuat_oleh_id' => $penggunaId,
-                        'dibuat_oleh_nama' => $request->input('user_name', 'Pengguna'),
+                        'dibuat_oleh_nama' => $user->nama,
                         'status_topik' => 'NEED_COMMENTS',
                     ]);
                 }
@@ -166,10 +172,10 @@ class ChatController extends Controller
                 [
                     'topik_id' => $topikId,
                     'pengguna_id' => $penggunaId,
-                    'nama_pengirim' => $request->input('user_name', ($user ? $user->nama : 'User')),
-                    'foto_pengirim' => $request->input('user_avatar', ($user ? $user->foto_profil : null)),
-                    'peran_pengirim' => $request->input('user_role', ($user ? $user->peran : 'EMPLOYEE')),
-                    'tipe_kepegawaian' => $user ? $user->tipe_kepegawaian : 'CONTRACT',
+                    'nama_pengirim' => $user->nama,
+                    'foto_pengirim' => $user->foto_profil,
+                    'peran_pengirim' => $user->peran,
+                    'tipe_kepegawaian' => $user->tipe_kepegawaian ?: 'CONTRACT',
                     'isi_pesan' => $isi,
                     'waktu_kirim' => date('H:i'),
                     'kanal' => $kanal,
@@ -190,8 +196,15 @@ class ChatController extends Controller
 
     public function deleteMessage(Request $request, $id)
     {
+        $user = $request->user();
+        $role = strtoupper((string) ($user->peran ?? ''));
+        $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
+
         $msg = ChatMessage::find($id);
         if ($msg) {
+            if (! $isAdmin && $msg->pengguna_id !== $user->id) {
+                return response()->json(['message' => 'Anda tidak berhak menghapus pesan milik pengguna lain.'], 403);
+            }
             $msg->delete();
         }
 

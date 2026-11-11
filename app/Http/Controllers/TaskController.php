@@ -66,6 +66,12 @@ class TaskController extends Controller
     public function storeKanbanTask(Request $request)
     {
         $user = $request->user();
+        $role = strtoupper((string) ($user->peran ?? ''));
+        if (! $user || ! in_array($role, ['SUPER_ADMIN', 'ADMIN'], true)) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin atau Super Admin yang dapat membuat tugas proyek.',
+            ], 403);
+        }
 
         $judul = $request->input('judul_tugas', $request->input('title'));
         $deskripsi = $request->input('deskripsi', $request->input('description', ''));
@@ -80,8 +86,6 @@ class TaskController extends Controller
 
         $taskId = $request->input('id', 'tsk_' . time() . '_' . Str::random(4));
 
-        $creatorName = $user ? $user->nama : ($request->input('created_by_name', $request->input('created_by', 'Administrator')));
-
         $task = KanbanTask::updateOrCreate(
             ['id' => $taskId],
             [
@@ -93,7 +97,7 @@ class TaskController extends Controller
                 'nama_petugas' => $petugasNama,
                 'foto_petugas' => $petugasFoto,
                 'daftar_anggota' => $anggota,
-                'dibuat_oleh' => $creatorName,
+                'dibuat_oleh' => $user->nama,
                 'tenggat_waktu' => $tenggat,
                 'lampiran' => $lampiran,
             ]
@@ -107,38 +111,55 @@ class TaskController extends Controller
 
     public function updateKanbanTask(Request $request, $id)
     {
+        $user = $request->user();
+        $role = strtoupper((string) ($user->peran ?? ''));
+        $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
+
         $task = KanbanTask::findOrFail($id);
 
+        if (! $isAdmin) {
+            $assignees = is_array($task->daftar_anggota) ? $task->daftar_anggota : [];
+            $isAssigned = ($task->ditugaskan_ke === $user->id) || in_array($user->id, $assignees, true);
+            if (! $isAssigned) {
+                return response()->json([
+                    'message' => 'Anda tidak memiliki akses untuk mengubah tugas ini.',
+                ], 403);
+            }
+        }
+
         $data = [];
-        if ($request->has('judul_tugas') || $request->has('title')) {
-            $data['judul_tugas'] = $request->input('judul_tugas', $request->input('title'));
+        if ($request->has('status_tugas') || $request->has('status')) {
+            $data['status_tugas'] = $request->input('status_tugas', $request->input('status'));
+        }
+        if ($request->has('lampiran') || $request->has('attachments')) {
+            $data['lampiran'] = $request->input('lampiran', $request->input('attachments'));
         }
         if ($request->has('deskripsi') || $request->has('description')) {
             $data['deskripsi'] = $request->input('deskripsi', $request->input('description'));
         }
-        if ($request->has('status_tugas') || $request->has('status')) {
-            $data['status_tugas'] = $request->input('status_tugas', $request->input('status'));
-        }
-        if ($request->has('prioritas') || $request->has('priority')) {
-            $data['prioritas'] = $request->input('prioritas', $request->input('priority'));
-        }
-        if ($request->has('ditugaskan_ke') || $request->has('assigned_to')) {
-            $data['ditugaskan_ke'] = $request->input('ditugaskan_ke', $request->input('assigned_to'));
-        }
-        if ($request->has('nama_petugas') || $request->has('assigned_name')) {
-            $data['nama_petugas'] = $request->input('nama_petugas', $request->input('assigned_name'));
-        }
-        if ($request->has('foto_petugas') || $request->has('assigned_avatar')) {
-            $data['foto_petugas'] = $request->input('foto_petugas', $request->input('assigned_avatar'));
-        }
-        if ($request->has('daftar_anggota') || $request->has('assignees')) {
-            $data['daftar_anggota'] = $request->input('daftar_anggota', $request->input('assignees'));
-        }
-        if ($request->has('tenggat_waktu') || $request->has('due_date')) {
-            $data['tenggat_waktu'] = $request->input('tenggat_waktu', $request->input('due_date'));
-        }
-        if ($request->has('lampiran') || $request->has('attachments')) {
-            $data['lampiran'] = $request->input('lampiran', $request->input('attachments'));
+
+        if ($isAdmin) {
+            if ($request->has('judul_tugas') || $request->has('title')) {
+                $data['judul_tugas'] = $request->input('judul_tugas', $request->input('title'));
+            }
+            if ($request->has('prioritas') || $request->has('priority')) {
+                $data['prioritas'] = $request->input('prioritas', $request->input('priority'));
+            }
+            if ($request->has('ditugaskan_ke') || $request->has('assigned_to')) {
+                $data['ditugaskan_ke'] = $request->input('ditugaskan_ke', $request->input('assigned_to'));
+            }
+            if ($request->has('nama_petugas') || $request->has('assigned_name')) {
+                $data['nama_petugas'] = $request->input('nama_petugas', $request->input('assigned_name'));
+            }
+            if ($request->has('foto_petugas') || $request->has('assigned_avatar')) {
+                $data['foto_petugas'] = $request->input('foto_petugas', $request->input('assigned_avatar'));
+            }
+            if ($request->has('daftar_anggota') || $request->has('assignees')) {
+                $data['daftar_anggota'] = $request->input('daftar_anggota', $request->input('assignees'));
+            }
+            if ($request->has('tenggat_waktu') || $request->has('due_date')) {
+                $data['tenggat_waktu'] = $request->input('tenggat_waktu', $request->input('due_date'));
+            }
         }
 
         $task->update($data);
@@ -151,6 +172,14 @@ class TaskController extends Controller
 
     public function deleteKanbanTask(Request $request, $id)
     {
+        $user = $request->user();
+        $role = strtoupper((string) ($user->peran ?? ''));
+        if (! $user || ! in_array($role, ['SUPER_ADMIN', 'ADMIN'], true)) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin atau Super Admin yang dapat menghapus tugas proyek.',
+            ], 403);
+        }
+
         $task = KanbanTask::find($id);
         if ($task) {
             $task->delete();

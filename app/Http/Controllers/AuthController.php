@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class AuthController extends Controller
@@ -15,49 +16,51 @@ class AuthController extends Controller
         $validated = $request->validate([
             'name' => 'nullable|string|max:255',
             'nama' => 'nullable|string|max:255',
-            'email' => 'required|email',
-            'password' => 'required|string|min:6',
-            'employment_type' => 'nullable|string',
-            'tipe_kepegawaian' => 'nullable|string',
-            'department' => 'nullable|string',
-            'divisi' => 'nullable|string',
-            'position' => 'nullable|string',
-            'jabatan' => 'nullable|string',
-            'phone' => 'nullable|string',
-            'nomor_telepon' => 'nullable|string',
+            'email' => 'required|email:rfc|max:255',
+            'password' => 'required|string|min:6|max:255',
+            'employment_type' => 'nullable|string|in:PERMANENT,CONTRACT,INTERN,FREELANCE',
+            'tipe_kepegawaian' => 'nullable|string|in:PERMANENT,CONTRACT,INTERN,FREELANCE',
+            'department' => 'nullable|string|max:100',
+            'divisi' => 'nullable|string|max:100',
+            'position' => 'nullable|string|max:100',
+            'jabatan' => 'nullable|string|max:100',
+            'phone' => 'nullable|string|max:50',
+            'nomor_telepon' => 'nullable|string|max:50',
         ]);
 
-        $nama = $validated['nama'] ?? $validated['name'] ?? 'Karyawan Baru';
+        $nama = trim((string) ($validated['nama'] ?? $validated['name'] ?? 'Karyawan Baru'));
         $tipe = $validated['tipe_kepegawaian'] ?? $validated['employment_type'] ?? 'CONTRACT';
-        $divisi = $validated['divisi'] ?? $validated['department'] ?? 'Operasional';
-        $jabatan = $validated['jabatan'] ?? $validated['position'] ?? 'Staff';
+        $divisi = trim((string) ($validated['divisi'] ?? $validated['department'] ?? 'Operasional'));
+        $jabatan = trim((string) ($validated['jabatan'] ?? $validated['position'] ?? 'Staff'));
         $telepon = $validated['nomor_telepon'] ?? $validated['phone'] ?? null;
+        $cleanEmail = strtolower(trim($validated['email']));
 
-        $existing = User::where('email', $validated['email'])->first();
+        $existing = User::whereRaw('LOWER(email) = ?', [$cleanEmail])->first();
         if ($existing) {
-            if ($existing->id === 'usr_super_admin' || in_array($existing->peran, ['SUPER_ADMIN', 'ADMIN'])) {
+            if ($existing->id === 'usr_super_admin' || in_array(strtoupper((string) $existing->peran), ['SUPER_ADMIN', 'ADMIN'], true)) {
                 return response()->json([
                     'message' => 'Alamat email ini milik Administrator dan tidak dapat didaftarkan sebagai akun baru.',
                 ], 422);
             }
-            if ($existing->status === 'ACTIVE') {
+            if (strtoupper((string) $existing->status) === 'ACTIVE') {
                 return response()->json([
                     'message' => 'Alamat email sudah terdaftar dan akun sudah aktif. Silakan masuk via halaman login.',
                 ], 422);
             }
-            if ($existing->status === 'PENDING_APPROVAL') {
+            if (strtoupper((string) $existing->status) === 'PENDING_APPROVAL') {
                 return response()->json([
                     'message' => 'Alamat email ini sudah terdaftar dan sedang dalam antrean persetujuan Administrator.',
                 ], 422);
             }
         }
 
-        $userId = 'usr_' . time() . '_' . Str::random(4);
+        $userId = 'usr_' . time() . '_' . Str::random(6);
 
+        // Akun pendaftar baru selalu dipaksa menjadi EMPLOYEE dengan status PENDING_APPROVAL
         $user = User::create([
             'id' => $userId,
             'nama' => $nama,
-            'email' => $validated['email'],
+            'email' => $cleanEmail,
             'password' => Hash::make($validated['password']),
             'peran' => 'EMPLOYEE',
             'status' => 'PENDING_APPROVAL',
@@ -72,7 +75,8 @@ class AuthController extends Controller
             'profil_lengkap' => false,
         ]);
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        // Token terbatas (scope pending) hanya untuk melengkapi biodata dan mengecek status persetujuan
+        $token = $user->createToken('pending-token', ['pending'])->plainTextToken;
 
         return response()->json([
             'message' => 'Pendaftaran berhasil. Silakan lengkapi biodata diri Anda.',
@@ -88,7 +92,7 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
-        $user = User::where('email', $validated['email'])->first();
+        $user = User::whereRaw('LOWER(email) = ?', [strtolower(trim($validated['email']))])->first();
 
         if (! $user || ! Hash::check($validated['password'], $user->password)) {
             return response()->json([
@@ -96,21 +100,43 @@ class AuthController extends Controller
             ], 401);
         }
 
-        if ($user->status === 'REJECTED') {
+        $status = strtoupper((string) $user->status);
+
+        if ($status === 'REJECTED' || $status === 'INACTIVE') {
             return response()->json([
-                'message' => 'Pendaftaran akun Anda ditolak: ' . ($user->alasan_penolakan ?: 'Tidak memenuhi persyaratan.'),
-                'status' => 'REJECTED',
+                'message' => 'Pendaftaran atau akses akun Anda dinonaktifkan: ' . ($user->alasan_penolakan ?: 'Tidak memenuhi persyaratan.'),
+                'status' => $status,
             ], 403);
         }
 
-        if ($user->status === 'PENDING_APPROVAL') {
+        if ($status === 'PENDING_APPROVAL') {
+            // Password valid -> berikan token scope terbatas ['pending'] agar PendingApprovalScreen
+            // dapat memantau persetujuan secara terautentikasi tanpa membuka endpoint publik
+            $pendingToken = $user->createToken('pending-token', ['pending'])->plainTextToken;
+
             return response()->json([
                 'message' => 'Akun Anda sedang dalam antrean peninjauan oleh Administrator. Harap tunggu hingga akun diverifikasi.',
                 'status' => 'PENDING_APPROVAL',
+                'token' => $pendingToken,
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->nama,
+                    'nama' => $user->nama,
+                    'email' => $user->email,
+                    'role' => $user->peran,
+                    'peran' => $user->peran,
+                    'status' => $user->status,
+                    'department' => $user->divisi,
+                    'position' => $user->jabatan,
+                    'employment_type' => $user->tipe_kepegawaian,
+                    'avatar' => $user->foto_profil,
+                    'profil_lengkap' => (bool) $user->profil_lengkap,
+                    'is_profile_complete' => (bool) $user->profil_lengkap,
+                ],
             ], 403);
         }
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        $token = $user->createToken('auth-token', ['*'])->plainTextToken;
 
         return response()->json([
             'message' => 'Login berhasil.',
@@ -126,24 +152,43 @@ class AuthController extends Controller
 
     public function updateProfile(Request $request)
     {
-        $targetId = $request->input('id', $request->input('user_id'));
-        $targetEmail = $request->input('current_email', $request->input('email'));
-
-        $user = null;
-        if ($targetId) {
-            $user = User::where('id', $targetId)->first();
-        }
-        if (! $user && $targetEmail) {
-            $user = User::where('email', $targetEmail)->first();
-        }
-        if (! $user) {
-            $user = $request->user();
-        }
-
-        if (! $user) {
+        $authUser = $request->user();
+        if (! $authUser) {
             return response()->json([
                 'message' => 'Sesi login tidak valid. Silakan login kembali.',
             ], 401);
+        }
+
+        $authRole = strtoupper((string) ($authUser->peran ?? ''));
+        $isAdmin = in_array($authRole, ['SUPER_ADMIN', 'ADMIN'], true) && strtoupper((string) $authUser->status) === 'ACTIVE';
+
+        $targetId = $request->input('id', $request->input('user_id'));
+        $targetEmail = $request->input('current_email');
+
+        $user = $authUser;
+        if (($targetId && $targetId !== $authUser->id) || ($targetEmail && strtolower(trim((string) $targetEmail)) !== strtolower((string) $authUser->email))) {
+            if (! $isAdmin) {
+                return response()->json([
+                    'message' => 'Operasi ditolak: Anda tidak memiliki izin untuk mengubah profil pengguna lain.',
+                ], 403);
+            }
+
+            $candidate = $targetId
+                ? User::where('id', $targetId)->first()
+                : User::whereRaw('LOWER(email) = ?', [strtolower(trim((string) $targetEmail))])->first();
+
+            if (! $candidate) {
+                return response()->json(['message' => 'Pengguna target tidak ditemukan.'], 404);
+            }
+
+            // Admin biasa tidak boleh memodifikasi akun Super Admin
+            if ($authRole !== 'SUPER_ADMIN' && ($candidate->id === 'usr_super_admin' || strtoupper((string) $candidate->peran) === 'SUPER_ADMIN')) {
+                return response()->json([
+                    'message' => 'Operasi ditolak: Akun Super Administrator tidak dapat dimodifikasi oleh Admin.',
+                ], 403);
+            }
+
+            $user = $candidate;
         }
 
         // Proteksi agar data pendaftar baru tidak menimpa akun Super Admin
@@ -169,6 +214,7 @@ class AuthController extends Controller
         $gender = $request->input('jenis_kelamin', $request->input('gender', $user->jenis_kelamin));
         $birthDate = $request->input('tanggal_lahir', $request->input('birth_date', $request->input('birthDate', $user->tanggal_lahir)));
 
+        // Catatan: Kolom kritis (peran, status, sisa_cuti) sengaja TIDAK pernah diperbarui melalui endpoint profil
         $data = [
             'nama' => $nama,
             'foto_profil' => $foto,
@@ -187,58 +233,112 @@ class AuthController extends Controller
         ];
 
         // Validasi dan update email jika diubah
-        if (! empty($email) && trim(strtolower($email)) !== trim(strtolower($user->email))) {
-            $emailExists = User::where('email', $email)->where('id', '!=', $user->id)->exists();
+        if (! empty($email) && trim(strtolower((string) $email)) !== trim(strtolower((string) $user->email))) {
+            if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return response()->json(['message' => 'Format alamat email tidak valid.'], 422);
+            }
+            $emailExists = User::whereRaw('LOWER(email) = ?', [strtolower(trim((string) $email))])
+                ->where('id', '!=', $user->id)
+                ->exists();
             if ($emailExists) {
                 return response()->json([
                     'message' => 'Alamat email baru sudah digunakan oleh akun lain.',
                 ], 422);
             }
-            $data['email'] = $email;
+            $data['email'] = strtolower(trim((string) $email));
         }
 
-        // Update tipe kepegawaian jika ada perubahan
-        if ($request->has('employment_type') || $request->has('tipe_kepegawaian')) {
-            $data['tipe_kepegawaian'] = $request->input('employment_type', $request->input('tipe_kepegawaian'));
+        // Tipe kepegawaian hanya boleh diubah oleh Admin/SuperAdmin atau saat pengguna baru mengisi onboarding
+        if (($isAdmin || strtoupper((string) $user->status) === 'PENDING_APPROVAL')
+            && ($request->has('employment_type') || $request->has('tipe_kepegawaian'))
+        ) {
+            $reqType = strtoupper((string) $request->input('employment_type', $request->input('tipe_kepegawaian')));
+            if (in_array($reqType, ['PERMANENT', 'CONTRACT', 'INTERN', 'FREELANCE'], true)) {
+                $data['tipe_kepegawaian'] = $reqType;
+            }
         }
 
         // Update kata sandi baru jika dikirim
         if ($request->has('password') && ! empty($request->password)) {
-            $rawPass = $request->password;
-            $data['password'] = str_starts_with($rawPass, '$2y$') ? $rawPass : Hash::make($rawPass);
+            $rawPass = (string) $request->password;
+            if (strlen($rawPass) < 6) {
+                return response()->json(['message' => 'Password minimal terdiri dari 6 karakter.'], 422);
+            }
+            $data['password'] = Hash::make($rawPass);
         }
 
         $user->update($data);
         $freshUser = $user->fresh();
-        $token = $freshUser->createToken('auth-token')->plainTextToken;
 
-        return response()->json([
+        $responsePayload = [
             'message' => 'Biodata diri dan kredensial berhasil diperbarui.',
             'user' => $freshUser,
-            'token' => $token,
-        ]);
+        ];
+
+        // Hanya kembalikan token baru jika pengguna memperbarui profilnya sendiri
+        if ($freshUser->id === $authUser->id) {
+            $ability = strtoupper((string) $freshUser->status) === 'ACTIVE' ? ['*'] : ['pending'];
+            $responsePayload['token'] = $freshUser->createToken('auth-token', $ability)->plainTextToken;
+        }
+
+        return response()->json($responsePayload);
     }
 
     public function getUsers(Request $request)
     {
+        $authUser = $request->user();
+        $role = strtoupper((string) ($authUser->peran ?? ''));
+        $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
+
         $users = User::where('status', '!=', 'REJECTED')->orderBy('nama')->get();
+
+        // Jika pemanggil adalah karyawan biasa, sembunyikan data finansial & kontak darurat milik karyawan lain
+        if (! $isAdmin) {
+            $sensitiveFields = [
+                'nama_bank',
+                'nomor_rekening',
+                'nama_pemilik_rekening',
+                'nama_kontak_darurat',
+                'nomor_kontak_darurat',
+                'alamat',
+                'alasan_penolakan',
+                'bank_name',
+                'bank_account_number',
+                'bank_account_holder',
+                'emergency_contact_name',
+                'emergency_contact_phone',
+                'address',
+            ];
+            $users->each(function (User $u) use ($authUser, $sensitiveFields) {
+                if ($u->id !== $authUser->id) {
+                    $u->makeHidden($sensitiveFields);
+                }
+            });
+        }
+
         return response()->json($users);
     }
 
     public function checkUserStatus(Request $request)
     {
-        $id = $request->query('id');
-        $email = $request->query('email');
+        $authUser = $request->user();
+        if (! $authUser) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
 
-        $user = null;
-        if ($id) {
-            $user = User::where('id', $id)->first();
-        }
-        if (! $user && $email) {
-            $user = User::where('email', $email)->first();
-        }
-        if (! $user && $request->user()) {
-            $user = $request->user();
+        $authRole = strtoupper((string) ($authUser->peran ?? ''));
+        $isAdmin = in_array($authRole, ['SUPER_ADMIN', 'ADMIN'], true) && strtoupper((string) $authUser->status) === 'ACTIVE';
+
+        // Non-admin hanya boleh mengecek status akunnya sendiri (mencegah enumerasi user & kebocoran PII)
+        $user = $authUser;
+        if ($isAdmin) {
+            $id = $request->query('id');
+            $email = $request->query('email');
+            if ($id) {
+                $user = User::where('id', $id)->first();
+            } elseif ($email) {
+                $user = User::whereRaw('LOWER(email) = ?', [strtolower(trim((string) $email))])->first();
+            }
         }
 
         if (! $user) {
@@ -252,12 +352,19 @@ class AuthController extends Controller
             'status' => $user->status,
             'role' => $user->peran,
             'profil_lengkap' => (bool) $user->profil_lengkap,
-            'user' => $user,
         ]);
     }
 
     public function approveUser(Request $request, $id)
     {
+        $authUser = $request->user();
+        $authRole = strtoupper((string) ($authUser->peran ?? ''));
+        if (! $authUser || ! in_array($authRole, ['SUPER_ADMIN', 'ADMIN'], true)) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin atau Super Admin yang dapat menyetujui akun.',
+            ], 403);
+        }
+
         $email = $request->input('email', $request->json('email'));
         $user = User::where('id', $id)
             ->orWhere('email', $id)
@@ -269,23 +376,35 @@ class AuthController extends Controller
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
 
-        $targetRole = $request->input('role', $request->input('peran', $request->json('role', $request->json('peran', 'EMPLOYEE'))));
-        if (! in_array($targetRole, ['SUPER_ADMIN', 'ADMIN', 'EMPLOYEE'])) {
+        $targetRole = strtoupper((string) $request->input('role', $request->input('peran', $request->json('role', $request->json('peran', 'EMPLOYEE')))));
+        if (! in_array($targetRole, ['SUPER_ADMIN', 'ADMIN', 'EMPLOYEE'], true)) {
             $targetRole = 'EMPLOYEE';
         }
 
-        $updateData = [
+        // Hanya Super Admin yang berhak menetapkan peran SUPER_ADMIN (mencegah Privilege Escalation oleh Admin biasa)
+        if ($targetRole === 'SUPER_ADMIN' && $authRole !== 'SUPER_ADMIN') {
+            return response()->json([
+                'message' => 'Hanya Super Admin yang berhak menetapkan peran Super Admin.',
+            ], 403);
+        }
+
+        $user->update([
             'status' => 'ACTIVE',
             'profil_lengkap' => true,
             'peran' => $targetRole,
-        ];
+        ]);
 
-        $user->update($updateData);
+        // Hapus token pending lama jika ada agar sesi baru menggunakan izin aktif penuh
+        $user->tokens()->where('name', 'pending-token')->delete();
 
-        // Kirim email persetujuan akun via EmailController
+        $appUrl = rtrim((string) config('app.url', ''), '/');
+        $portalCtaHtml = $appUrl !== ''
+            ? "<div style='text-align:center;margin:28px 0 16px 0;'><a href='{$appUrl}' style='background-color:#1E3A8A;color:#ffffff;padding:12px 26px;font-size:13px;font-weight:700;text-decoration:none;border-radius:10px;display:inline-block;'>Buka Portal in-Time &rarr;</a></div>"
+            : '';
+
         try {
             $roleLabel = $user->peran === 'SUPER_ADMIN' ? 'Superadmin' : ($user->peran === 'ADMIN' ? 'Admin' : 'Karyawan');
-            $emailReq = new Request([
+            app(EmailController::class)->dispatchEmail([
                 'to' => $user->email,
                 'subject' => "Akun Terverifikasi: Selamat Datang di in-Time, {$user->nama}!",
                 'html' => "<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:580px;margin:auto;padding:24px;background:#f8fafc;'>"
@@ -302,45 +421,73 @@ class AuthController extends Controller
                     . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Peran Akun:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$roleLabel}</td></tr>"
                     . "<tr><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Status Akun:</td><td style='padding:10px 0;color:#16a34a;font-weight:bold;font-size:13px;'>Aktif (Terverifikasi)</td></tr>"
                     . "</table>"
-                    . "<div style='text-align:center;margin:28px 0 16px 0;'>"
-                    . "<a href='https://in-time.duckdns.org' style='background-color:#1E3A8A;color:#ffffff;padding:12px 26px;font-size:13px;font-weight:700;text-decoration:none;border-radius:10px;display:inline-block;'>Buka Portal in-Time &rarr;</a>"
-                    . "</div>"
+                    . $portalCtaHtml
                     . "</div>"
                     . "</div>"
                     . "</div>",
-                'text' => "Halo {$user->nama},\n\nAkun in-Time Anda telah resmi disetujui dan aktif.\nEmail: {$user->email}\nPeran: {$roleLabel}\nStatus: Aktif\n\nSilakan login ke https://in-time.duckdns.org",
+                'text' => "Halo {$user->nama},\n\nAkun in-Time Anda telah resmi disetujui dan aktif.\nEmail: {$user->email}\nPeran: {$roleLabel}\nStatus: Aktif" . ($appUrl !== '' ? "\n\nSilakan login ke {$appUrl}" : ''),
             ]);
-            app(EmailController::class)->sendEmail($emailReq);
         } catch (\Throwable $mailErr) {
-            \Log::warning("[AuthController] Gagal auto-send email persetujuan: " . $mailErr->getMessage());
+            Log::warning('[AuthController] Gagal auto-send email persetujuan: ' . $mailErr->getMessage());
         }
 
         return response()->json([
             'message' => 'Akun karyawan berhasil disetujui.',
-            'user' => $user,
+            'user' => $user->fresh(),
         ]);
     }
 
     public function rejectUser(Request $request, $id)
     {
+        $authUser = $request->user();
+        $authRole = strtoupper((string) ($authUser->peran ?? ''));
+        if (! $authUser || ! in_array($authRole, ['SUPER_ADMIN', 'ADMIN'], true)) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin atau Super Admin yang dapat menolak pendaftaran.',
+            ], 403);
+        }
+
         $reason = $request->input('alasan', $request->input('reason'));
 
         $user = User::where('id', $id)->orWhere('email', $id)->first();
-        if ($user) {
-            $user->update([
-                'status' => 'REJECTED',
-                'alasan_penolakan' => $reason,
-            ]);
+        if (! $user) {
+            return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
+
+        if ($user->id === 'usr_super_admin' || strtoupper((string) $user->peran) === 'SUPER_ADMIN') {
+            return response()->json([
+                'message' => 'Akun Super Admin tidak dapat ditolak atau dinonaktifkan.',
+            ], 403);
+        }
+
+        if ($authRole !== 'SUPER_ADMIN' && strtoupper((string) $user->peran) === 'ADMIN') {
+            return response()->json([
+                'message' => 'Hanya Super Admin yang dapat menonaktifkan akun Admin.',
+            ], 403);
+        }
+
+        $user->update([
+            'status' => 'REJECTED',
+            'alasan_penolakan' => $reason,
+        ]);
+        $user->tokens()->delete();
 
         return response()->json([
             'message' => 'Pendaftaran karyawan telah ditolak.',
-            'user' => $user,
+            'user' => $user->fresh(),
         ]);
     }
 
     public function updateUserRole(Request $request, $id)
     {
+        $authUser = $request->user();
+        $authRole = strtoupper((string) ($authUser->peran ?? ''));
+        if (! $authUser || ! in_array($authRole, ['SUPER_ADMIN', 'ADMIN'], true)) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin atau Super Admin yang berhak mengubah peran.',
+            ], 403);
+        }
+
         $email = $request->input('email', $request->json('email'));
         $user = User::where('id', $id)
             ->orWhere('email', $id)
@@ -352,9 +499,22 @@ class AuthController extends Controller
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
 
-        $newRole = $request->input('role', $request->input('peran', $request->json('role', $request->json('peran'))));
-        if (! in_array($newRole, ['SUPER_ADMIN', 'ADMIN', 'EMPLOYEE'])) {
+        if ($user->id === 'usr_super_admin') {
+            return response()->json([
+                'message' => 'Peran akun Super Admin utama tidak dapat diubah.',
+            ], 403);
+        }
+
+        $newRole = strtoupper((string) $request->input('role', $request->input('peran', $request->json('role', $request->json('peran')))));
+        if (! in_array($newRole, ['SUPER_ADMIN', 'ADMIN', 'EMPLOYEE'], true)) {
             return response()->json(['message' => 'Role tidak valid.'], 422);
+        }
+
+        // Hanya Super Admin yang dapat menetapkan/mencabut peran SUPER_ADMIN atau mengubah Admin lain
+        if ($authRole !== 'SUPER_ADMIN' && ($newRole === 'SUPER_ADMIN' || strtoupper((string) $user->peran) === 'SUPER_ADMIN')) {
+            return response()->json([
+                'message' => 'Hanya Super Admin yang berhak menetapkan atau mengubah peran Super Admin.',
+            ], 403);
         }
 
         $user->update(['peran' => $newRole]);
@@ -367,6 +527,14 @@ class AuthController extends Controller
 
     public function updateEmploymentType(Request $request, $id)
     {
+        $authUser = $request->user();
+        $authRole = strtoupper((string) ($authUser->peran ?? ''));
+        if (! $authUser || ! in_array($authRole, ['SUPER_ADMIN', 'ADMIN'], true)) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin atau Super Admin yang berhak mengubah tipe kepegawaian.',
+            ], 403);
+        }
+
         $email = $request->input('email', $request->json('email'));
         $user = User::where('id', $id)
             ->orWhere('email', $id)
@@ -378,7 +546,11 @@ class AuthController extends Controller
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
 
-        $newType = $request->input('employment_type', $request->input('tipe_kepegawaian', $request->json('employment_type', $request->json('tipe_kepegawaian', 'CONTRACT'))));
+        $newType = strtoupper((string) $request->input('employment_type', $request->input('tipe_kepegawaian', $request->json('employment_type', $request->json('tipe_kepegawaian', 'CONTRACT')))));
+        if (! in_array($newType, ['PERMANENT', 'CONTRACT', 'INTERN', 'FREELANCE'], true)) {
+            return response()->json(['message' => 'Tipe kepegawaian tidak valid.'], 422);
+        }
+
         $user->update(['tipe_kepegawaian' => $newType]);
 
         return response()->json([
@@ -387,86 +559,66 @@ class AuthController extends Controller
         ]);
     }
 
-    public function repairSuperAdmin()
-    {
-        $sa = User::updateOrCreate(
-            ['id' => 'usr_super_admin'],
-            [
-                'nama' => 'Super Admin',
-                'email' => 'nasywadavina384@gmail.com',
-                'peran' => 'SUPER_ADMIN',
-                'status' => 'ACTIVE',
-                'divisi' => 'Direksi Eksekutif',
-                'jabatan' => 'Super Administrator',
-                'tipe_kepegawaian' => 'PERMANENT',
-                'profil_lengkap' => true,
-            ]
-        );
-        return response()->json(['message' => 'Super Admin resmi berhasil dipulihkan.', 'user' => $sa]);
-    }
-
     public function deleteUser(Request $request, $id)
     {
         $currentUser = $request->user();
-        $userRole = $currentUser ? strtoupper($currentUser->peran) : '';
-        if (! $currentUser || ! in_array($userRole, ['SUPER_ADMIN', 'ADMIN'])) {
+        $userRole = $currentUser ? strtoupper((string) $currentUser->peran) : '';
+        if (! $currentUser || ! in_array($userRole, ['SUPER_ADMIN', 'ADMIN'], true)) {
             return response()->json([
                 'message' => 'Unauthorized. Hanya Admin/Super Admin yang berhak menghapus karyawan.',
             ], 403);
         }
 
-        // Cari user berdasarkan ID ataupun Email
         $user = User::where('id', $id)->orWhere('email', $id)->first();
         if (! $user) {
-            // Jika user sudah tidak ada di database, anggap berhasil agar sinkron
             return response()->json([
                 'message' => 'User sudah tidak ada di sistem database.',
                 'id' => $id,
             ], 200);
         }
 
-        if ($user->id === 'usr_super_admin' || $user->email === 'nasywadavina384@gmail.com' || strtoupper($user->peran) === 'SUPER_ADMIN') {
+        if ($user->id === $currentUser->id) {
+            return response()->json([
+                'message' => 'Anda tidak dapat menghapus akun Anda sendiri.',
+            ], 403);
+        }
+
+        if ($user->id === 'usr_super_admin' || strtoupper((string) $user->peran) === 'SUPER_ADMIN') {
             return response()->json([
                 'message' => 'Akun Super Admin utama tidak dapat dihapus.',
             ], 403);
         }
 
+        if ($userRole !== 'SUPER_ADMIN' && strtoupper((string) $user->peran) === 'ADMIN') {
+            return response()->json([
+                'message' => 'Hanya Super Admin yang berhak menghapus akun Admin.',
+            ], 403);
+        }
+
+        $targetId = $user->id;
+
+        DB::beginTransaction();
         try {
-            DB::beginTransaction();
-
-            $targetId = $user->id;
-
-            // 1. Bersihkan tugas proyek (baik ditugaskan ke maupun dibuat oleh user ini)
             DB::table('tugas_proyek')
                 ->where('ditugaskan_ke', $targetId)
                 ->orWhere('dibuat_oleh', $targetId)
                 ->delete();
 
-            // 2. Bersihkan pesan obrolan di topik yang dibuat oleh user ini, lalu hapus topiknya
             $userTopicIds = DB::table('topik_diskusi')->where('dibuat_oleh_id', $targetId)->pluck('id');
             if ($userTopicIds->isNotEmpty()) {
                 DB::table('pesan_diskusi')->whereIn('topik_id', $userTopicIds)->delete();
                 DB::table('topik_diskusi')->whereIn('id', $userTopicIds)->delete();
             }
 
-            // 3. Bersihkan seluruh pesan obrolan yang pernah dikirim oleh user ini
             DB::table('pesan_diskusi')->where('pengguna_id', $targetId)->delete();
-
-            // 4. Bersihkan logbook harian
             DB::table('logbook_harian')->where('pengguna_id', $targetId)->delete();
-
-            // 5. Bersihkan pengajuan izin
             DB::table('pengajuan_izin')->where('pengguna_id', $targetId)->delete();
-
-            // 6. Bersihkan riwayat presensi
             DB::table('presensi')->where('pengguna_id', $targetId)->delete();
 
-            // 7. Bersihkan personal access tokens (Sanctum)
             DB::table('personal_access_tokens')
                 ->where('tokenable_id', $targetId)
                 ->delete();
 
-            // 8. Hapus entri karyawan dari tabel pengguna
             DB::table('pengguna')->where('id', $targetId)->delete();
 
             DB::commit();
@@ -485,7 +637,10 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        $token = $request->user()?->currentAccessToken();
+        if ($token && method_exists($token, 'delete')) {
+            $token->delete();
+        }
 
         return response()->json([
             'message' => 'Berhasil logout.',

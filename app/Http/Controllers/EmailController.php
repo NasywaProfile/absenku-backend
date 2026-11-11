@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -13,50 +14,106 @@ use Symfony\Component\Mime\Email;
 class EmailController extends Controller
 {
     /**
-     * Dispatcher email terpadu untuk platform in-Time
-     * Menggunakan Symfony EsmtpTransport langsung (Gmail SMTP) & Fallback Resend API
+     * Endpoint HTTP pengiriman email notifikasi (terautentikasi & anti open-relay)
      */
     public function sendEmail(Request $request)
     {
-        $to = $request->input('to');
-        $subject = $request->input('subject');
-        $html = $request->input('html', '');
-        $text = $request->input('text', '');
-
-        if (empty($to) || empty($subject)) {
+        $user = $request->user();
+        if (! $user || strtoupper((string) $user->status) !== 'ACTIVE') {
             return response()->json([
                 'success' => false,
-                'message' => 'Alamat email tujuan (to) dan subjek (subject) wajib diisi.',
-            ], 400);
+                'message' => 'Hanya pengguna aktif yang dapat mengirim notifikasi email.',
+            ], 403);
+        }
+
+        $validated = $request->validate([
+            'to' => 'required|email:rfc|max:255',
+            'subject' => 'required|string|max:255',
+            'html' => 'nullable|string|max:100000',
+            'text' => 'nullable|string|max:50000',
+        ]);
+
+        $to = strtolower(trim($validated['to']));
+        $callerRole = strtoupper((string) $user->peran);
+
+        // Cegah penyalahgunaan sebagai Open Relay:
+        // Karyawan non-Admin hanya boleh mengirim notifikasi ke alamat email pengguna terdaftar atau email sistem resmi.
+        if (! in_array($callerRole, ['SUPER_ADMIN', 'ADMIN'], true)) {
+            $systemFrom = strtolower((string) config('mail.from.address', ''));
+            $isRegisteredRecipient = User::whereRaw('LOWER(email) = ?', [$to])->exists();
+
+            if (! $isRegisteredRecipient && $to !== $systemFrom) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Pengiriman email ke alamat eksternal tidak diizinkan.',
+                ], 403);
+            }
+        }
+
+        $result = $this->dispatchEmail([
+            'to' => $validated['to'],
+            'subject' => $validated['subject'],
+            'html' => $validated['html'] ?? '',
+            'text' => $validated['text'] ?? '',
+        ]);
+
+        return response()->json(
+            $result['body'],
+            $result['status']
+        );
+    }
+
+    /**
+     * Dispatcher email internal untuk platform in-Time.
+     * Membaca konfigurasi melalui config() agar aman saat config:cache aktif di produksi.
+     */
+    public function dispatchEmail(array $payload): array
+    {
+        $to = trim((string) ($payload['to'] ?? ''));
+        $subject = trim((string) ($payload['subject'] ?? ''));
+        $html = (string) ($payload['html'] ?? '');
+        $text = (string) ($payload['text'] ?? '');
+
+        if ($to === '' || $subject === '') {
+            return [
+                'status' => 400,
+                'body' => [
+                    'success' => false,
+                    'message' => 'Alamat email tujuan (to) dan subjek (subject) wajib diisi.',
+                ],
+            ];
         }
 
         $sent = false;
         $errors = [];
-        $rawUser = env('MAIL_USERNAME', env('SMTP_USER'));
-        $smtpUser = (!empty($rawUser) && $rawUser !== 'null') ? (string) $rawUser : 'naswa.wijaya31@gmail.com';
-        $rawFromName = env('MAIL_FROM_NAME', env('SMTP_FROM_NAME', env('APP_NAME', 'in-Time')));
-        $fromName = (empty($rawFromName) || strtolower(trim($rawFromName)) === 'laravel') ? 'in-Time' : trim($rawFromName);
-        $rawAddress = env('MAIL_FROM_ADDRESS');
-        $fromAddress = (!empty($rawAddress) && $rawAddress !== 'null' && $rawAddress !== 'hello@example.com') ? (string) $rawAddress : $smtpUser;
 
-        $passwords = array_values(array_unique(array_filter([
-            env('MAIL_PASSWORD'),
-            env('SMTP_PASS'),
-        ])));
+        $smtpHost = (string) (config('mail.mailers.smtp.host') ?: 'smtp.gmail.com');
+        $rawUser = config('mail.mailers.smtp.username');
+        $smtpUser = (! empty($rawUser) && $rawUser !== 'null') ? (string) $rawUser : '';
+        $rawPassword = config('mail.mailers.smtp.password');
+        $smtpPassword = (! empty($rawPassword) && $rawPassword !== 'null') ? (string) $rawPassword : '';
 
-        $ports = [587, 465];
+        $rawFromName = config('mail.from.name', config('app.name', 'in-Time'));
+        $fromName = (empty($rawFromName) || strtolower(trim((string) $rawFromName)) === 'laravel')
+            ? 'in-Time'
+            : trim((string) $rawFromName);
 
-        // 1. OPSI UTAMA: RESEND REST API (in-Time <onboarding@resend.dev>)
-        $resendKey = env('RESEND_API_KEY');
-        if ($resendKey) {
+        $rawAddress = config('mail.from.address');
+        $fromAddress = (! empty($rawAddress) && $rawAddress !== 'null' && $rawAddress !== 'hello@example.com')
+            ? (string) $rawAddress
+            : $smtpUser;
+
+        // 1. OPSI UTAMA: RESEND REST API
+        $resendKey = config('services.resend.key');
+        if (! empty($resendKey)) {
             try {
-                $fromEmail = env('RESEND_FROM_EMAIL', 'onboarding@resend.dev');
+                $fromEmail = (string) (config('services.resend.from_email') ?: 'onboarding@resend.dev');
 
                 $response = Http::withHeaders([
                     'Authorization' => "Bearer {$resendKey}",
                     'Content-Type' => 'application/json',
                 ])->post('https://api.resend.com/emails', [
-                    'from' => "in-Time <{$fromEmail}>",
+                    'from' => "{$fromName} <{$fromEmail}>",
                     'to' => [$to],
                     'subject' => $subject,
                     'html' => $html ?: $text,
@@ -65,49 +122,48 @@ class EmailController extends Controller
 
                 if ($response->successful()) {
                     $sent = true;
-                    Log::info("[EmailController] Email berhasil terkirim ke {$to} via Resend API (in-Time <{$fromEmail}>)");
+                    Log::info("[EmailController] Email berhasil terkirim ke {$to} via Resend API");
                 } else {
                     $errors[] = 'Resend API: ' . $response->body();
-                    Log::warning("[EmailController] Resend API gagal: " . $response->body());
+                    Log::warning('[EmailController] Resend API gagal: ' . $response->body());
                 }
-            } catch (\Throwable $e2) {
-                $errors[] = 'Resend Exception: ' . $e2->getMessage();
+            } catch (\Throwable $e) {
+                $errors[] = 'Resend Exception: ' . $e->getMessage();
             }
         }
 
-        // 2. OPSI FALLBACK: SYMFONY ESMTP TRANSPORT (GMAIL SMTP)
+        // 2. OPSI FALLBACK: SYMFONY ESMTP TRANSPORT (SMTP)
         if (! $sent) {
-            if (empty($passwords)) {
-                $errors[] = 'Gmail SMTP: MAIL_PASSWORD belum diatur pada .env server VPS.';
-            }
-            foreach ($passwords as $pwd) {
-                if ($sent) {
-                    break;
-                }
+            if ($smtpUser === '' || $smtpPassword === '') {
+                $errors[] = 'SMTP: MAIL_USERNAME atau MAIL_PASSWORD belum dikonfigurasi pada server.';
+            } else {
+                $configuredPort = (int) (config('mail.mailers.smtp.port') ?: 587);
+                $ports = array_values(array_unique([$configuredPort, 587, 465]));
+
                 foreach ($ports as $port) {
                     if ($sent) {
                         break;
                     }
                     try {
                         $isSsl = ($port === 465);
-                        $transport = new EsmtpTransport('smtp.gmail.com', $port, $isSsl);
+                        $transport = new EsmtpTransport($smtpHost, $port, $isSsl);
                         $transport->setUsername($smtpUser);
-                        $transport->setPassword($pwd);
+                        $transport->setPassword($smtpPassword);
                         $mailer = new Mailer($transport);
 
                         $email = (new Email())
-                            ->from(new Address($fromAddress, 'in-Time'))
+                            ->from(new Address($fromAddress ?: $smtpUser, $fromName))
                             ->to($to)
                             ->subject($subject)
                             ->html($html ?: $text);
 
-                        if (! empty($text)) {
+                        if ($text !== '') {
                             $email->text($text);
                         }
 
                         $mailer->send($email);
                         $sent = true;
-                        Log::info("[EmailController] Email berhasil terkirim ke {$to} via Gmail SMTP (port {$port})");
+                        Log::info("[EmailController] Email berhasil terkirim ke {$to} via SMTP (port {$port})");
                     } catch (\Throwable $e) {
                         $errors[] = "SMTP port {$port}: " . $e->getMessage();
                         Log::warning("[EmailController] SMTP port {$port} gagal: " . $e->getMessage());
@@ -117,40 +173,22 @@ class EmailController extends Controller
         }
 
         if ($sent) {
-            return response()->json([
-                'success' => true,
-                'message' => 'Email notifikasi berhasil dikirimkan ke ' . $to,
-            ]);
+            return [
+                'status' => 200,
+                'body' => [
+                    'success' => true,
+                    'message' => 'Email notifikasi berhasil dikirimkan ke ' . $to,
+                ],
+            ];
         }
 
-        return response()->json([
-            'success' => false,
-            'message' => 'Gagal mengirim email notifikasi.',
-            'errors' => $errors,
-        ], 500);
-    }
-
-    /**
-     * Endpoint diagnostik pengujian email
-     */
-    public function testEmail(Request $request)
-    {
-        $to = $request->query('to', 'nasywadavina384@gmail.com');
-        $req = new Request([
-            'to' => $to,
-            'subject' => '[Uji Coba] Diagnostik Email in-Time ' . date('d-m-Y H:i:s'),
-            'html' => '<div style="font-family:sans-serif;padding:24px;border:1px solid #e2e8f0;border-radius:14px;max-width:550px;background:#ffffff;">'
-                . '<div style="background:#1E3A8A;padding:16px 20px;border-radius:10px;margin-bottom:20px;">'
-                . '<h2 style="color:#ffffff;margin:0;font-size:18px;">in-Time Sistem Notifikasi</h2>'
-                . '</div>'
-                . '<p style="color:#0f172a;font-size:14px;line-height:1.6;">Selamat! Sistem pengiriman email otomatis in-Time telah aktif dan berhasil terkirim langsung ke Gmail inbox Anda.</p>'
-                . '<p style="color:#475569;font-size:13px;">Waktu pengiriman: <strong>' . date('d-m-Y H:i:s') . ' WIB</strong></p>'
-                . '<hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;" />'
-                . '<p style="color:#94a3b8;font-size:11px;">Pemberitahuan resmi otomatis dari platform in-Time.</p>'
-                . '</div>',
-            'text' => 'Selamat! Sistem pengiriman email otomatis in-Time telah aktif dan berhasil terkirim.',
-        ]);
-
-        return $this->sendEmail($req);
+        return [
+            'status' => 500,
+            'body' => [
+                'success' => false,
+                'message' => 'Gagal mengirim email notifikasi.',
+                'errors' => $errors,
+            ],
+        ];
     }
 }

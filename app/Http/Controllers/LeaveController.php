@@ -90,6 +90,11 @@ class LeaveController extends Controller
 
             $recipientEmail = config('mail.from.address', 'naswa.wijaya31@gmail.com');
 
+            $appUrl = rtrim((string) config('app.url', ''), '/');
+            $panelLinkHtml = $appUrl !== ''
+                ? "<div style='margin-top: 15px;'><a href='{$appUrl}' style='background-color: #0284c7; color: white; padding: 10px 18px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;'>Buka Panel Absenku</a></div>"
+                : '';
+
             $htmlContent = "
             <div style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;'>
                 <div style='background-color: #0284c7; color: white; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px;'>
@@ -101,23 +106,23 @@ class LeaveController extends Controller
                 <table style='width: 100%; border-collapse: collapse; margin-bottom: 20px;'>
                     <tr style='border-bottom: 1px solid #e2e8f0;'>
                         <td style='padding: 8px 0; font-weight: bold; width: 35%;'>Nama Karyawan:</td>
-                        <td style='padding: 8px 0;'>{$user->nama}</td>
+                        <td style='padding: 8px 0;'>" . e($user->nama) . "</td>
                     </tr>
                     <tr style='border-bottom: 1px solid #e2e8f0;'>
                         <td style='padding: 8px 0; font-weight: bold;'>Divisi:</td>
-                        <td style='padding: 8px 0;'>{$user->divisi}</td>
+                        <td style='padding: 8px 0;'>" . e($user->divisi) . "</td>
                     </tr>
                     <tr style='border-bottom: 1px solid #e2e8f0;'>
                         <td style='padding: 8px 0; font-weight: bold;'>Jenis Pengajuan:</td>
-                        <td style='padding: 8px 0;'><span style='background-color: #e0f2fe; color: #0369a1; padding: 3px 8px; border-radius: 4px; font-weight: bold;'>{$labelKategori}</span></td>
+                        <td style='padding: 8px 0;'><span style='background-color: #e0f2fe; color: #0369a1; padding: 3px 8px; border-radius: 4px; font-weight: bold;'>" . e($labelKategori) . "</span></td>
                     </tr>
                     <tr style='border-bottom: 1px solid #e2e8f0;'>
                         <td style='padding: 8px 0; font-weight: bold;'>Periode:</td>
-                        <td style='padding: 8px 0;'>{$tglMulai} s.d. {$tglSelesai} ({$jmlHari} hari)</td>
+                        <td style='padding: 8px 0;'>" . e($tglMulai) . " s.d. " . e($tglSelesai) . " (" . (int) $jmlHari . " hari)</td>
                     </tr>
                     <tr style='border-bottom: 1px solid #e2e8f0;'>
                         <td style='padding: 8px 0; font-weight: bold;'>Alasan:</td>
-                        <td style='padding: 8px 0;'>{$alasan}</td>
+                        <td style='padding: 8px 0;'>" . e($alasan) . "</td>
                     </tr>
                     <tr style='border-bottom: 1px solid #e2e8f0;'>
                         <td style='padding: 8px 0; font-weight: bold;'>Waktu Pengajuan:</td>
@@ -126,21 +131,18 @@ class LeaveController extends Controller
                 </table>
 
                 <p style='margin-top: 20px;'>Silakan buka aplikasi Absenku untuk meninjau dan memberikan persetujuan:</p>
-                <div style='margin-top: 15px;'>
-                    <a href='http://localhost:3000' style='background-color: #0284c7; color: white; padding: 10px 18px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;'>Buka Panel Absenku</a>
-                </div>
+                {$panelLinkHtml}
                 
                 <hr style='border: none; border-top: 1px solid #e2e8f0; margin: 30px 0 15px 0;' />
                 <p style='font-size: 12px; color: #64748b; margin: 0;'>Pesan ini dikirimkan otomatis oleh sistem Absenku.</p>
             </div>";
 
-            $emailReq = new Request([
+            app(EmailController::class)->dispatchEmail([
                 'to' => $recipientEmail,
                 'subject' => "[in-Time] Pengajuan {$labelKategori} Baru - {$user->nama}",
                 'html' => $htmlContent,
                 'text' => "Pemberitahuan Pengajuan Izin Baru: {$user->nama} ({$labelKategori}) dari {$tglMulai} s.d. {$tglSelesai}.",
             ]);
-            app(EmailController::class)->sendEmail($emailReq);
         } catch (\Throwable $mailErr) {
             \Illuminate\Support\Facades\Log::warning('Gagal mengirimkan notifikasi email pengajuan izin: ' . $mailErr->getMessage());
         }
@@ -154,6 +156,12 @@ class LeaveController extends Controller
     public function approve(Request $request, $id)
     {
         $admin = $request->user();
+        if (! $admin || ! in_array(strtoupper((string) $admin->peran), ['SUPER_ADMIN', 'ADMIN'], true)) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin atau Super Admin yang dapat menyetujui perizinan.',
+            ], 403);
+        }
+
         $leave = LeaveRequest::findOrFail($id);
 
         $leave->update([
@@ -173,7 +181,7 @@ class LeaveController extends Controller
         // Kirim email konfirmasi ACC ke karyawan pemohon
         if ($applicant && ! empty($applicant->email)) {
             try {
-                $emailReq = new Request([
+                app(EmailController::class)->dispatchEmail([
                     'to' => $applicant->email,
                     'subject' => "[in-Time] Pengajuan Izin Disetujui ({$leave->kategori_izin})",
                     'html' => "<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:580px;margin:auto;padding:24px;background:#f8fafc;'>"
@@ -182,12 +190,12 @@ class LeaveController extends Controller
                         . "<h2 style='margin:0;font-size:18px;'>Pengajuan Izin Telah Disetujui</h2>"
                         . "</div>"
                         . "<div style='padding:24px 28px;'>"
-                        . "<p style='font-size:14px;color:#1e293b;'>Halo <strong>{$applicant->nama}</strong>,</p>"
+                        . "<p style='font-size:14px;color:#1e293b;'>Halo <strong>" . e($applicant->nama) . "</strong>,</p>"
                         . "<p style='font-size:14px;color:#334155;'>Kabar baik! Pengajuan izin/cuti Anda telah resmi disetujui oleh Administrator.</p>"
                         . "<table style='width:100%;border-collapse:collapse;margin:20px 0;'>"
-                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Kategori:</td><td style='padding:8px 0;color:#0f172a;'>{$leave->kategori_izin}</td></tr>"
-                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Periode:</td><td style='padding:8px 0;color:#0f172a;'>{$leave->tanggal_mulai} s/d {$leave->tanggal_selesai} ({$leave->jumlah_hari} Hari)</td></tr>"
-                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Disetujui Oleh:</td><td style='padding:8px 0;color:#0f172a;'>{$admin->nama}</td></tr>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Kategori:</td><td style='padding:8px 0;color:#0f172a;'>" . e($leave->kategori_izin) . "</td></tr>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Periode:</td><td style='padding:8px 0;color:#0f172a;'>" . e($leave->tanggal_mulai) . " s/d " . e($leave->tanggal_selesai) . " ({$leave->jumlah_hari} Hari)</td></tr>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Disetujui Oleh:</td><td style='padding:8px 0;color:#0f172a;'>" . e($admin->nama) . "</td></tr>"
                         . "<tr><td style='padding:8px 0;font-weight:600;color:#475569;'>Status:</td><td style='padding:8px 0;color:#16a34a;font-weight:bold;'>DISETUJUI (APPROVED)</td></tr>"
                         . "</table>"
                         . "</div>"
@@ -195,7 +203,6 @@ class LeaveController extends Controller
                         . "</div>",
                     'text' => "Halo {$applicant->nama},\n\nPengajuan {$leave->kategori_izin} Anda ({$leave->tanggal_mulai} s/d {$leave->tanggal_selesai}) telah DISETUJUI oleh {$admin->nama}.",
                 ]);
-                app(EmailController::class)->sendEmail($emailReq);
             } catch (\Throwable $e) {
                 \Log::warning("Gagal kirim email ACC izin: " . $e->getMessage());
             }
@@ -210,6 +217,12 @@ class LeaveController extends Controller
     public function reject(Request $request, $id)
     {
         $admin = $request->user();
+        if (! $admin || ! in_array(strtoupper((string) $admin->peran), ['SUPER_ADMIN', 'ADMIN'], true)) {
+            return response()->json([
+                'message' => 'Unauthorized. Hanya Admin atau Super Admin yang dapat menolak perizinan.',
+            ], 403);
+        }
+
         $leave = LeaveRequest::findOrFail($id);
 
         $reason = $request->input('alasan', $request->input('reason'));
@@ -225,7 +238,7 @@ class LeaveController extends Controller
         $applicant = User::find($leave->pengguna_id);
         if ($applicant && ! empty($applicant->email)) {
             try {
-                $emailReq = new Request([
+                app(EmailController::class)->dispatchEmail([
                     'to' => $applicant->email,
                     'subject' => "[in-Time] Pengajuan Izin Ditolak ({$leave->kategori_izin})",
                     'html' => "<div style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;max-width:580px;margin:auto;padding:24px;background:#f8fafc;'>"
@@ -234,18 +247,17 @@ class LeaveController extends Controller
                         . "<h2 style='margin:0;font-size:18px;'>Pemberitahuan Penolakan Izin</h2>"
                         . "</div>"
                         . "<div style='padding:24px 28px;'>"
-                        . "<p style='font-size:14px;color:#1e293b;'>Halo <strong>{$applicant->nama}</strong>,</p>"
+                        . "<p style='font-size:14px;color:#1e293b;'>Halo <strong>" . e($applicant->nama) . "</strong>,</p>"
                         . "<p style='font-size:14px;color:#334155;'>Mohon maaf, pengajuan izin/cuti Anda belum dapat disetujui oleh Administrator.</p>"
                         . "<table style='width:100%;border-collapse:collapse;margin:20px 0;'>"
-                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Kategori:</td><td style='padding:8px 0;color:#0f172a;'>{$leave->kategori_izin}</td></tr>"
-                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Alasan Penolakan:</td><td style='padding:8px 0;color:#dc2626;font-weight:bold;'>" . ($reason ?: 'Tidak memenuhi ketentuan operasional') . "</td></tr>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Kategori:</td><td style='padding:8px 0;color:#0f172a;'>" . e($leave->kategori_izin) . "</td></tr>"
+                        . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:8px 0;font-weight:600;color:#475569;'>Alasan Penolakan:</td><td style='padding:8px 0;color:#dc2626;font-weight:bold;'>" . e($reason ?: 'Tidak memenuhi ketentuan operasional') . "</td></tr>"
                         . "</table>"
                         . "</div>"
                         . "</div>"
                         . "</div>",
                     'text' => "Halo {$applicant->nama},\n\nPengajuan {$leave->kategori_izin} Anda ditolak. Alasan: " . ($reason ?: '-'),
                 ]);
-                app(EmailController::class)->sendEmail($emailReq);
             } catch (\Throwable $e) {
                 \Log::warning("Gagal kirim email penolakan izin: " . $e->getMessage());
             }
