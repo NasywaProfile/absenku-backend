@@ -26,7 +26,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
 });
 
-// Authenticated + Active Account Routes (hanya untuk pengguna dengan status ACTIVE)
+// Authenticated + Active Account Routes (hanya untuk pengguna dengan status ACTIVE & full token)
 Route::middleware(['auth:sanctum', EnsureUserIsActive::class])->group(function () {
     // Upload Berkas (terautentikasi & tervalidasi MIME/ekstensi/ukuran)
     Route::post('/upload', [UploadController::class, 'upload'])->middleware('throttle:30,1');
@@ -35,39 +35,46 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class])->group(function (
     // Pengiriman Email Notifikasi (terautentikasi, rate-limited, & anti open-relay)
     Route::post('/send-email', [EmailController::class, 'sendEmail'])->middleware('throttle:20,1');
 
-    // Manajemen Pengguna & RBAC (otorisasi peran diverifikasi di AuthController)
-    Route::get('/users', [AuthController::class, 'getUsers']);
-    Route::match(['put', 'post'], '/users/{id}/approve', [AuthController::class, 'approveUser']);
-    Route::match(['put', 'post'], '/users/{id}/role', [AuthController::class, 'updateUserRole']);
-    Route::match(['put', 'post'], '/users/{id}/employment-type', [AuthController::class, 'updateEmploymentType']);
-    Route::post('/users/{id}/reject', [AuthController::class, 'rejectUser']);
-    Route::delete('/users/{id}', [AuthController::class, 'deleteUser']);
-
-    // Konfigurasi Kantor & Geofence
+    // Konfigurasi Kantor & Geofence (read untuk radar karyawan, write khusus SUPER_ADMIN)
     Route::get('/office-config', [OfficeConfigController::class, 'show']);
-    Route::put('/office-config', [OfficeConfigController::class, 'update']);
+    Route::put('/office-config', [OfficeConfigController::class, 'update'])->middleware('role:SUPER_ADMIN');
 
-    // Presensi (perhitungan Haversine & keterlambatan otoritatif di server)
+    // Data Pengguna (field sensitif & pending accounts disaring untuk non-admin di controller)
+    Route::get('/users', [AuthController::class, 'getUsers']);
+
+    // Rute Khusus Admin & Super Admin (ditegakkan di middleware route + controller)
+    Route::middleware('role:SUPER_ADMIN,ADMIN')->group(function () {
+        Route::match(['put', 'post'], '/users/{id}/approve', [AuthController::class, 'approveUser']);
+        Route::match(['put', 'post'], '/users/{id}/role', [AuthController::class, 'updateUserRole']);
+        Route::match(['put', 'post'], '/users/{id}/employment-type', [AuthController::class, 'updateEmploymentType']);
+        Route::post('/users/{id}/reject', [AuthController::class, 'rejectUser']);
+        Route::delete('/users/{id}', [AuthController::class, 'deleteUser']);
+
+        Route::delete('/attendance', [AttendanceController::class, 'destroy']);
+        Route::delete('/attendance/today', [AttendanceController::class, 'destroy']);
+
+        Route::post('/leaves/{id}/approve', [LeaveController::class, 'approve']);
+        Route::post('/leaves/{id}/reject', [LeaveController::class, 'reject']);
+
+        Route::post('/kanban-tasks', [TaskController::class, 'storeKanbanTask']);
+        Route::delete('/kanban-tasks/{id}', [TaskController::class, 'deleteKanbanTask']);
+    });
+
+    // Presensi (perhitungan Haversine, jam masuk WIB & keterlambatan otoritatif di server)
     Route::get('/attendance', [AttendanceController::class, 'index']);
     Route::get('/attendance/today', [AttendanceController::class, 'today']);
     Route::post('/attendance', [AttendanceController::class, 'store']);
-    Route::delete('/attendance', [AttendanceController::class, 'destroy']);
-    Route::delete('/attendance/today', [AttendanceController::class, 'destroy']);
 
     // Pengajuan Cuti / Izin / WFH / Dinas Luar
     Route::get('/leaves', [LeaveController::class, 'index']);
     Route::post('/leaves', [LeaveController::class, 'store']);
-    Route::post('/leaves/{id}/approve', [LeaveController::class, 'approve']);
-    Route::post('/leaves/{id}/reject', [LeaveController::class, 'reject']);
     Route::delete('/leaves/{id}', [LeaveController::class, 'destroy']);
 
     // Logbook Harian & Tugas Proyek (Kanban)
     Route::get('/daily-logs', [TaskController::class, 'getDailyLogs']);
     Route::post('/daily-logs', [TaskController::class, 'saveDailyLog']);
     Route::get('/kanban-tasks', [TaskController::class, 'getKanbanTasks']);
-    Route::post('/kanban-tasks', [TaskController::class, 'storeKanbanTask']);
     Route::match(['put', 'post'], '/kanban-tasks/{id}', [TaskController::class, 'updateKanbanTask']);
-    Route::delete('/kanban-tasks/{id}', [TaskController::class, 'deleteKanbanTask']);
 
     // Ruang Diskusi & Obrolan Tim
     Route::get('/chat/topics', [ChatController::class, 'getTopics']);

@@ -290,9 +290,16 @@ class AuthController extends Controller
         $role = strtoupper((string) ($authUser->peran ?? ''));
         $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
 
-        $users = User::where('status', '!=', 'REJECTED')->orderBy('nama')->get();
+        $query = User::query();
+        if ($isAdmin) {
+            $query->where('status', '!=', 'REJECTED');
+        } else {
+            // Non-admin hanya boleh melihat rekan aktif (tidak mengekspos pendaftar PENDING_APPROVAL)
+            $query->where('status', 'ACTIVE');
+        }
+        $users = $query->orderBy('nama')->get();
 
-        // Jika pemanggil adalah karyawan biasa, sembunyikan data finansial & kontak darurat milik karyawan lain
+        // Jika pemanggil adalah karyawan biasa, sembunyikan data finansial, kontak darurat, tgl lahir & kuota cuti milik karyawan lain
         if (! $isAdmin) {
             $sensitiveFields = [
                 'nama_bank',
@@ -302,12 +309,17 @@ class AuthController extends Controller
                 'nomor_kontak_darurat',
                 'alamat',
                 'alasan_penolakan',
+                'tanggal_lahir',
+                'sisa_cuti',
                 'bank_name',
                 'bank_account_number',
                 'bank_account_holder',
                 'emergency_contact_name',
                 'emergency_contact_phone',
                 'address',
+                'birth_date',
+                'birthDate',
+                'leave_balance',
             ];
             $users->each(function (User $u) use ($authUser, $sensitiveFields) {
                 if ($u->id !== $authUser->id) {
@@ -381,10 +393,10 @@ class AuthController extends Controller
             $targetRole = 'EMPLOYEE';
         }
 
-        // Hanya Super Admin yang berhak menetapkan peran SUPER_ADMIN (mencegah Privilege Escalation oleh Admin biasa)
-        if ($targetRole === 'SUPER_ADMIN' && $authRole !== 'SUPER_ADMIN') {
+        // Admin biasa hanya boleh menyetujui pendaftar menjadi EMPLOYEE; Admin/SuperAdmin hanya oleh Super Admin
+        if ($authRole !== 'SUPER_ADMIN' && ($targetRole !== 'EMPLOYEE' || in_array(strtoupper((string) $user->peran), ['SUPER_ADMIN', 'ADMIN'], true) || $user->id === 'usr_super_admin')) {
             return response()->json([
-                'message' => 'Hanya Super Admin yang berhak menetapkan peran Super Admin.',
+                'message' => 'Hanya Super Admin yang berhak menetapkan peran Admin atau Super Admin.',
             ], 403);
         }
 
@@ -510,10 +522,11 @@ class AuthController extends Controller
             return response()->json(['message' => 'Role tidak valid.'], 422);
         }
 
-        // Hanya Super Admin yang dapat menetapkan/mencabut peran SUPER_ADMIN atau mengubah Admin lain
-        if ($authRole !== 'SUPER_ADMIN' && ($newRole === 'SUPER_ADMIN' || strtoupper((string) $user->peran) === 'SUPER_ADMIN')) {
+        // Hanya Super Admin yang dapat menetapkan/mencabut peran ADMIN atau SUPER_ADMIN
+        $currentTargetRole = strtoupper((string) $user->peran);
+        if ($authRole !== 'SUPER_ADMIN' && ($newRole !== 'EMPLOYEE' || in_array($currentTargetRole, ['SUPER_ADMIN', 'ADMIN'], true))) {
             return response()->json([
-                'message' => 'Hanya Super Admin yang berhak menetapkan atau mengubah peran Super Admin.',
+                'message' => 'Hanya Super Admin yang berhak menetapkan atau mengubah peran Admin maupun Super Admin.',
             ], 403);
         }
 
@@ -544,6 +557,12 @@ class AuthController extends Controller
             ->first();
         if (! $user) {
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
+        }
+
+        if ($authRole !== 'SUPER_ADMIN' && ($user->id === 'usr_super_admin' || strtoupper((string) $user->peran) === 'SUPER_ADMIN')) {
+            return response()->json([
+                'message' => 'Tipe kepegawaian akun Super Admin tidak dapat diubah oleh Admin.',
+            ], 403);
         }
 
         $newType = strtoupper((string) $request->input('employment_type', $request->input('tipe_kepegawaian', $request->json('employment_type', $request->json('tipe_kepegawaian', 'CONTRACT')))));

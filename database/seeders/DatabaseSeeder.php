@@ -5,15 +5,16 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Konfigurasi Kantor Pusat (IndigoSpace Malang)
-        DB::table('konfigurasi_kantor')->updateOrInsert(
-            ['id' => 1],
-            [
+        // 1. Konfigurasi Kantor Pusat (hanya inisialisasi jika tabel masih kosong)
+        if (DB::table('konfigurasi_kantor')->count() === 0) {
+            DB::table('konfigurasi_kantor')->insert([
+                'id' => 1,
                 'nama_kantor' => 'IndigoSpace Malang (Kantor Pusat)',
                 'alamat_kantor' => 'Jl. Simpang Borobudur No. 1, Mojolangu, Kec. Lowokwaru, Kota Malang, Jawa Timur 65142',
                 'latitude' => -7.94390000,
@@ -25,53 +26,68 @@ class DatabaseSeeder extends Seeder
                 'status_geofence_aktif' => true,
                 'created_at' => now(),
                 'updated_at' => now(),
-            ]
-        );
+            ]);
+        }
 
-        // 2. Data Pengguna Super Admin Resmi
-        $superAdmin = [
-            'id' => 'usr_super_admin',
-            'nama' => 'Super Admin',
-            'email' => 'nasywadavina384@gmail.com',
-            'password' => Hash::make('SuperAdminabsenkuMantap'),
-            'peran' => 'SUPER_ADMIN',
-            'status' => 'ACTIVE',
-            'tipe_kepegawaian' => 'PERMANENT',
-            'divisi' => 'Direksi Eksekutif',
-            'jabatan' => 'Super Administrator',
-            'foto_profil' => 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
-            'nomor_telepon' => '081288889999',
-            'tanggal_bergabung' => '2024-01-01',
-            'sisa_cuti' => 24,
-            'nama_bank' => 'BCA (Bank Central Asia)',
-            'nomor_rekening' => '8830192831',
-            'nama_pemilik_rekening' => 'Super Admin',
-            'nama_kontak_darurat' => 'Kontak Darurat Pusat',
-            'nomor_kontak_darurat' => '081299990000',
-            'alamat' => 'Jl. Simpang Borobudur No. 1, Lowokwaru, Kota Malang',
-            'waktu_daftar' => '2024-01-01 08:00',
-            'profil_lengkap' => true,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ];
+        // 2. Data Pengguna Super Admin Awal (HANYA dibuat jika belum ada; tidak pernah menimpa akun existing)
+        $hasSuperAdmin = DB::table('pengguna')
+            ->where('id', 'usr_super_admin')
+            ->orWhere('peran', 'SUPER_ADMIN')
+            ->exists();
 
-        DB::table('pengguna')->updateOrInsert(
-            ['id' => 'usr_super_admin'],
-            $superAdmin
-        );
+        if (! $hasSuperAdmin) {
+            $saEmail = strtolower(trim((string) config('absenku.seed_super_admin_email')));
+            $saPassword = (string) config('absenku.seed_super_admin_password');
+            $saName = trim((string) (config('absenku.seed_super_admin_name') ?: 'Super Admin'));
 
-        // Jika tidak disetel SEED_DUMMY_DATA=true, berhenti di sini (Database Bersih / Fresh dari 0 untuk Produksi)
-        if (!env('SEED_DUMMY_DATA', false)) {
+            if ($saEmail === '' || $saPassword === '') {
+                if (app()->isProduction()) {
+                    $this->command?->warn(
+                        'Super Admin belum dibuat karena SEED_SUPER_ADMIN_EMAIL / SEED_SUPER_ADMIN_PASSWORD belum disetel. Jalankan: php artisan absenku:set-superadmin'
+                    );
+                    return;
+                }
+
+                $saEmail = $saEmail !== '' ? $saEmail : 'admin@absenku.local';
+                $saPassword = $saPassword !== '' ? $saPassword : Str::password(20);
+                $this->command?->warn("Super Admin lokal dibuat otomatis -> Email: {$saEmail} | Password acak: {$saPassword}");
+            }
+
+            DB::table('pengguna')->insert([
+                'id' => 'usr_super_admin',
+                'nama' => $saName,
+                'email' => $saEmail,
+                'password' => Hash::make($saPassword),
+                'peran' => 'SUPER_ADMIN',
+                'status' => 'ACTIVE',
+                'tipe_kepegawaian' => 'PERMANENT',
+                'divisi' => 'Direksi Eksekutif',
+                'jabatan' => 'Super Administrator',
+                'foto_profil' => '',
+                'nomor_telepon' => '',
+                'tanggal_bergabung' => date('Y-m-d'),
+                'sisa_cuti' => 24,
+                'waktu_daftar' => date('Y-m-d H:i'),
+                'profil_lengkap' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        // Data dummy dilarang keras di-seed pada environment produksi
+        if (app()->isProduction() || ! config('absenku.seed_dummy_data', false)) {
             return;
         }
 
-        // Data Karyawan Dummy (Hanya dijalankan jika SEED_DUMMY_DATA=true)
+        $dummyPasswordHash = Hash::make((string) (config('absenku.seed_dummy_password') ?: Str::password(16)));
+
+        // Data Karyawan Dummy (Hanya dijalankan di non-produksi jika SEED_DUMMY_DATA=true)
         $users = [
             [
                 'id' => 'usr_emp_01',
                 'nama' => 'Budi Santoso',
                 'email' => 'budi.santoso@absenku.id',
-                'password' => Hash::make('Password123!'),
+                'password' => $dummyPasswordHash,
                 'peran' => 'EMPLOYEE',
                 'status' => 'ACTIVE',
                 'tipe_kepegawaian' => 'PERMANENT',
@@ -94,7 +110,7 @@ class DatabaseSeeder extends Seeder
                 'id' => 'usr_emp_02',
                 'nama' => 'Siti Rahmawati',
                 'email' => 'siti.rahmawati@absenku.id',
-                'password' => Hash::make('Password123!'),
+                'password' => $dummyPasswordHash,
                 'peran' => 'EMPLOYEE',
                 'status' => 'ACTIVE',
                 'tipe_kepegawaian' => 'PERMANENT',
@@ -117,7 +133,7 @@ class DatabaseSeeder extends Seeder
                 'id' => 'usr_emp_03',
                 'nama' => 'Ahmad Fauzi',
                 'email' => 'ahmad.fauzi@absenku.id',
-                'password' => Hash::make('Password123!'),
+                'password' => $dummyPasswordHash,
                 'peran' => 'EMPLOYEE',
                 'status' => 'ACTIVE',
                 'tipe_kepegawaian' => 'CONTRACT',
@@ -140,7 +156,7 @@ class DatabaseSeeder extends Seeder
                 'id' => 'usr_emp_04',
                 'nama' => 'Dewi Lestari',
                 'email' => 'dewi.lestari@absenku.id',
-                'password' => Hash::make('Password123!'),
+                'password' => $dummyPasswordHash,
                 'peran' => 'EMPLOYEE',
                 'status' => 'ACTIVE',
                 'tipe_kepegawaian' => 'PERMANENT',
@@ -163,7 +179,7 @@ class DatabaseSeeder extends Seeder
                 'id' => 'usr_emp_05',
                 'nama' => 'Rizky Pratama',
                 'email' => 'rizky.pratama@absenku.id',
-                'password' => Hash::make('Password123!'),
+                'password' => $dummyPasswordHash,
                 'peran' => 'EMPLOYEE',
                 'status' => 'ACTIVE',
                 'tipe_kepegawaian' => 'PERMANENT',
@@ -186,7 +202,7 @@ class DatabaseSeeder extends Seeder
                 'id' => 'usr_emp_06',
                 'nama' => 'Nadia Putri',
                 'email' => 'nadia.putri@absenku.id',
-                'password' => Hash::make('Password123!'),
+                'password' => $dummyPasswordHash,
                 'peran' => 'EMPLOYEE',
                 'status' => 'ACTIVE',
                 'tipe_kepegawaian' => 'INTERN',
@@ -209,7 +225,7 @@ class DatabaseSeeder extends Seeder
                 'id' => 'usr_emp_07',
                 'nama' => 'Dimas Wahyudi',
                 'email' => 'dimas.wahyudi@absenku.id',
-                'password' => Hash::make('Password123!'),
+                'password' => $dummyPasswordHash,
                 'peran' => 'EMPLOYEE',
                 'status' => 'ACTIVE',
                 'tipe_kepegawaian' => 'INTERN',

@@ -34,9 +34,16 @@ class TaskController extends Controller
     {
         $user = $request->user();
 
-        $tanggal = $request->input('tanggal', $request->input('date', date('Y-m-d')));
+        $tanggal = (string) $request->input('tanggal', $request->input('date', now('Asia/Jakarta')->toDateString()));
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $tanggal)) {
+            return response()->json(['message' => 'Format tanggal logbook harus YYYY-MM-DD.'], 422);
+        }
         $tugas = $request->input('daftar_tugas', $request->input('tasks', []));
-        $catatan = $request->input('catatan', $request->input('notes', ''));
+        if (! is_array($tugas)) {
+            $tugas = [];
+        }
+        $tugas = array_slice($tugas, 0, 50);
+        $catatan = mb_substr(trim((string) $request->input('catatan', $request->input('notes', ''))), 0, 5000);
 
         $log = DailyTaskLog::updateOrCreate(
             [
@@ -73,10 +80,19 @@ class TaskController extends Controller
             ], 403);
         }
 
-        $judul = $request->input('judul_tugas', $request->input('title'));
+        $judul = trim((string) $request->input('judul_tugas', $request->input('title', '')));
+        if ($judul === '') {
+            return response()->json(['message' => 'Judul tugas wajib diisi.'], 422);
+        }
         $deskripsi = $request->input('deskripsi', $request->input('description', ''));
-        $status = $request->input('status_tugas', $request->input('status', 'TODO'));
-        $prioritas = $request->input('prioritas', $request->input('priority', 'MEDIUM'));
+        $status = strtoupper((string) $request->input('status_tugas', $request->input('status', 'TODO')));
+        if (! in_array($status, ['TODO', 'IN_PROGRESS', 'DONE', 'REVIEWED', 'REVISION'], true)) {
+            $status = 'TODO';
+        }
+        $prioritas = strtoupper((string) $request->input('prioritas', $request->input('priority', 'MEDIUM')));
+        if (! in_array($prioritas, ['LOW', 'MEDIUM', 'HIGH', 'URGENT'], true)) {
+            $prioritas = 'MEDIUM';
+        }
         $ditugaskan = $request->input('ditugaskan_ke', $request->input('assigned_to'));
         $petugasNama = $request->input('nama_petugas', $request->input('assigned_name'));
         $petugasFoto = $request->input('foto_petugas', $request->input('assigned_avatar'));
@@ -129,21 +145,35 @@ class TaskController extends Controller
 
         $data = [];
         if ($request->has('status_tugas') || $request->has('status')) {
-            $data['status_tugas'] = $request->input('status_tugas', $request->input('status'));
+            $reqStatus = strtoupper((string) $request->input('status_tugas', $request->input('status')));
+            $validStatuses = ['TODO', 'IN_PROGRESS', 'DONE', 'REVIEWED', 'REVISION'];
+            if (! in_array($reqStatus, $validStatuses, true)) {
+                return response()->json(['message' => 'Status tugas tidak valid.'], 422);
+            }
+            // Karyawan non-Admin tidak berhak menyetujui/ACC tugas sendiri (REVIEWED / REVISION)
+            if (! $isAdmin && in_array($reqStatus, ['REVIEWED', 'REVISION'], true)) {
+                return response()->json([
+                    'message' => 'Hanya Admin atau Super Admin yang dapat menyetujui atau meminta revisi tugas.',
+                ], 403);
+            }
+            $data['status_tugas'] = $reqStatus;
         }
         if ($request->has('lampiran') || $request->has('attachments')) {
             $data['lampiran'] = $request->input('lampiran', $request->input('attachments'));
         }
-        if ($request->has('deskripsi') || $request->has('description')) {
-            $data['deskripsi'] = $request->input('deskripsi', $request->input('description'));
-        }
 
         if ($isAdmin) {
+            if ($request->has('deskripsi') || $request->has('description')) {
+                $data['deskripsi'] = $request->input('deskripsi', $request->input('description'));
+            }
             if ($request->has('judul_tugas') || $request->has('title')) {
                 $data['judul_tugas'] = $request->input('judul_tugas', $request->input('title'));
             }
             if ($request->has('prioritas') || $request->has('priority')) {
-                $data['prioritas'] = $request->input('prioritas', $request->input('priority'));
+                $reqPrio = strtoupper((string) $request->input('prioritas', $request->input('priority')));
+                if (in_array($reqPrio, ['LOW', 'MEDIUM', 'HIGH', 'URGENT'], true)) {
+                    $data['prioritas'] = $reqPrio;
+                }
             }
             if ($request->has('ditugaskan_ke') || $request->has('assigned_to')) {
                 $data['ditugaskan_ke'] = $request->input('ditugaskan_ke', $request->input('assigned_to'));

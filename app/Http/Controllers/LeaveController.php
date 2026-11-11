@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\LeaveRequest;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -34,11 +35,31 @@ class LeaveController extends Controller
     {
         $user = $request->user();
 
-        $kategori = $request->input('kategori_izin', $request->input('category'));
-        $tglMulai = $request->input('tanggal_mulai', $request->input('start_date'));
-        $tglSelesai = $request->input('tanggal_selesai', $request->input('end_date'));
-        $jmlHari = $request->input('jumlah_hari', $request->input('total_days', 1));
-        $alasan = $request->input('alasan', $request->input('reason'));
+        $kategori = strtoupper(trim((string) $request->input('kategori_izin', $request->input('category', ''))));
+        if (! in_array($kategori, ['LEAVE', 'CUTI', 'WFH', 'SICK', 'BUSINESS_TRIP'], true)) {
+            return response()->json(['message' => 'Kategori izin tidak valid.'], 422);
+        }
+
+        $tglMulai = trim((string) $request->input('tanggal_mulai', $request->input('start_date', '')));
+        $tglSelesai = trim((string) $request->input('tanggal_selesai', $request->input('end_date', '')));
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $tglMulai) || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $tglSelesai)) {
+            return response()->json(['message' => 'Format tanggal mulai/selesai harus YYYY-MM-DD.'], 422);
+        }
+
+        $startCarbon = Carbon::createFromFormat('Y-m-d', $tglMulai);
+        $endCarbon = Carbon::createFromFormat('Y-m-d', $tglSelesai);
+        if ($endCarbon->lt($startCarbon)) {
+            return response()->json(['message' => 'Tanggal selesai tidak boleh lebih awal dari tanggal mulai.'], 422);
+        }
+
+        // Hitung jumlah_hari secara otoritatif di server agar tidak dapat dimanipulasi menjadi nilai negatif
+        $jmlHari = max(1, (int) ($startCarbon->diffInDays($endCarbon) + 1));
+
+        $alasan = trim((string) $request->input('alasan', $request->input('reason', '')));
+        if ($alasan === '') {
+            return response()->json(['message' => 'Alasan pengajuan izin wajib diisi.'], 422);
+        }
+
         $namaLampiran = $request->input('nama_lampiran', $request->input('attachment_name'));
         $dataLampiran = $request->input('data_lampiran', $request->input('attachment_data'));
         $tipeLampiran = $request->input('tipe_lampiran', $request->input('attachment_type'));
@@ -57,7 +78,10 @@ class LeaveController extends Controller
             ], 200);
         }
 
-        $leaveId = $request->input('id', 'lve_' . time() . '_' . Str::random(4));
+        $candidateId = trim((string) $request->input('id', ''));
+        $leaveId = ($candidateId !== '' && preg_match('/^[a-zA-Z0-9_-]{4,50}$/', $candidateId) && ! LeaveRequest::where('id', $candidateId)->exists())
+            ? $candidateId
+            : ('lve_' . time() . '_' . Str::random(6));
 
         $leave = LeaveRequest::create([
             'id' => $leaveId,
@@ -69,7 +93,7 @@ class LeaveController extends Controller
             'tanggal_mulai' => $tglMulai,
             'tanggal_selesai' => $tglSelesai,
             'jumlah_hari' => $jmlHari,
-            'alasan' => $alasan,
+            'alasan' => mb_substr($alasan, 0, 2000),
             'nama_lampiran' => $namaLampiran,
             'data_lampiran' => $dataLampiran,
             'tipe_lampiran' => $tipeLampiran,
@@ -156,13 +180,29 @@ class LeaveController extends Controller
     public function approve(Request $request, $id)
     {
         $admin = $request->user();
-        if (! $admin || ! in_array(strtoupper((string) $admin->peran), ['SUPER_ADMIN', 'ADMIN'], true)) {
+        $adminRole = strtoupper((string) ($admin?->peran ?? ''));
+        if (! $admin || ! in_array($adminRole, ['SUPER_ADMIN', 'ADMIN'], true)) {
             return response()->json([
                 'message' => 'Unauthorized. Hanya Admin atau Super Admin yang dapat menyetujui perizinan.',
             ], 403);
         }
 
         $leave = LeaveRequest::findOrFail($id);
+
+        // Admin biasa tidak boleh menyetujui pengajuan izin miliknya sendiri
+        if ($leave->pengguna_id === $admin->id && $adminRole !== 'SUPER_ADMIN') {
+            return response()->json([
+                'message' => 'Operasi ditolak: Anda tidak dapat menyetujui pengajuan izin milik sendiri.',
+            ], 403);
+        }
+
+        // Idempotency guard agar kuota cuti tidak terpotong dua kali
+        if (strtoupper((string) $leave->status_pengajuan) === 'APPROVED') {
+            return response()->json([
+                'message' => 'Pengajuan sudah berstatus disetujui sebelumnya.',
+                'leave' => $leave,
+            ], 409);
+        }
 
         $leave->update([
             'status_pengajuan' => 'APPROVED',
@@ -172,9 +212,10 @@ class LeaveController extends Controller
 
         // Potong sisa cuti jika kategori adalah LEAVE / CUTI
         $applicant = User::find($leave->pengguna_id);
-        if (in_array($leave->kategori_izin, ['LEAVE', 'CUTI'])) {
-            if ($applicant && $applicant->sisa_cuti >= $leave->jumlah_hari) {
-                $applicant->decrement('sisa_cuti', $leave->jumlah_hari);
+        $days = max(1, (int) $leave->jumlah_hari);
+        if (in_array(strtoupper((string) $leave->kategori_izin), ['LEAVE', 'CUTI'], true)) {
+            if ($applicant && $applicant->sisa_cuti >= $days) {
+                $applicant->decrement('sisa_cuti', $days);
             }
         }
 
@@ -217,13 +258,20 @@ class LeaveController extends Controller
     public function reject(Request $request, $id)
     {
         $admin = $request->user();
-        if (! $admin || ! in_array(strtoupper((string) $admin->peran), ['SUPER_ADMIN', 'ADMIN'], true)) {
+        $adminRole = strtoupper((string) ($admin?->peran ?? ''));
+        if (! $admin || ! in_array($adminRole, ['SUPER_ADMIN', 'ADMIN'], true)) {
             return response()->json([
                 'message' => 'Unauthorized. Hanya Admin atau Super Admin yang dapat menolak perizinan.',
             ], 403);
         }
 
         $leave = LeaveRequest::findOrFail($id);
+
+        if ($leave->pengguna_id === $admin->id && $adminRole !== 'SUPER_ADMIN') {
+            return response()->json([
+                'message' => 'Operasi ditolak: Anda tidak dapat menolak pengajuan izin milik sendiri.',
+            ], 403);
+        }
 
         $reason = $request->input('alasan', $request->input('reason'));
 
@@ -277,8 +325,15 @@ class LeaveController extends Controller
         }
 
         $user = $request->user();
-        if ($user && ! in_array($user->peran, ['SUPER_ADMIN', 'ADMIN']) && $leave->pengguna_id !== $user->id) {
+        $role = strtoupper((string) ($user?->peran ?? ''));
+        $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
+
+        if (! $user || (! $isAdmin && $leave->pengguna_id !== $user->id)) {
             return response()->json(['message' => 'Tidak memiliki izin.'], 403);
+        }
+
+        if (! $isAdmin && strtoupper((string) $leave->status_pengajuan) === 'APPROVED') {
+            return response()->json(['message' => 'Pengajuan yang sudah disetujui tidak dapat dihapus oleh karyawan.'], 403);
         }
 
         $leave->delete();

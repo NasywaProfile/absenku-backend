@@ -162,19 +162,30 @@ Tabel standar resmi dari **Laravel Sanctum** untuk pengelolaan token otentikasi 
 
 ---
 
-## ⚡ Cara Menjalankan Backend
+## ⚡ Cara Menjalankan Backend & Praktik Produksi
 
+### 1. Lingkungan Lokal (Development)
 1. **Jalankan Apache & MySQL di XAMPP Control Panel**.
 2. Masuk ke direktori backend:
    ```bash
    cd D:\Project-Indiekraf-Internship\absenku-backend
    ```
-3. Migrasi & Seeder Database:
+3. Jalankan migrasi dan setup akun Super Admin (via `.env` atau perintah Artisan):
    ```bash
-   php artisan migrate:fresh --seed
+   php artisan migrate
+   php artisan absenku:set-superadmin
    ```
 4. Jalankan Server API:
    ```bash
    php artisan serve --port=8000
    ```
 API siap digunakan pada: `http://127.0.0.1:8000/api`
+
+### 2. Aturan Wajib Server Produksi
+* **JANGAN PERNAH** menjalankan `php artisan migrate:fresh` pada server produksi (diblokir otomatis saat `APP_ENV=production`). Gunakan `php artisan migrate --force` hanya setelah membuat backup.
+* **Setel `.env` produksi:** `APP_ENV=production`, `APP_DEBUG=false`, `APP_URL=https://domain-anda`, `APP_FORCE_HTTPS=true`, `SESSION_SECURE_COOKIE=true`, dan `CORS_ALLOWED_ORIGINS=https://domain-anda`.
+* **Aktifkan Backup Database Otomatis:**
+  Jalankan manual: `php artisan db:backup` (tersimpan terkompresi di `storage/app/backups/` dengan retensi 14 hari), dan pasang Laravel scheduler cron di server:
+  ```cron
+  * * * * * cd /var/www/absenku-backend && php artisan schedule:run >> /dev/null 2>&1
+  ```

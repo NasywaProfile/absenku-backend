@@ -19,7 +19,11 @@
 /public/hot
 /public/storage
 /storage/*.key
+/storage/app/backups
 /storage/pail
+/database/backups/*.sql
+/database/backups/*.sql.gz
+/database/backups/*.sqlite*
 /vendor
 _ide_helper.php
 Homestead.json

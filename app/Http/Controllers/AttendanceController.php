@@ -139,6 +139,13 @@ class AttendanceController extends Controller
             ], 422);
         }
 
+        // Tolak koordinat kosong (0, 0 / Null Island) yang menandakan sinyal GPS belum aktif
+        if (abs($lat) < 0.0001 && abs($lng) < 0.0001) {
+            return response()->json([
+                'message' => 'Sinyal GPS belum valid (0, 0). Aktifkan izin lokasi perangkat Anda.',
+            ], 422);
+        }
+
         $office = $this->getAuthoritativeOfficeConfig();
 
         // Hitung ulang jarak Haversine langsung di server (mengabaikan input jarak_meter dari klien)
@@ -302,11 +309,24 @@ class AttendanceController extends Controller
             return response()->json(['message' => 'User ID diperlukan.'], 422);
         }
 
-        // Proteksi integritas data: Admin dilarang menghapus catatan presensinya sendiri
+        // Proteksi integritas data: Admin dilarang menghapus catatan presensinya sendiri atau milik Super Admin
         if ($targetUserId === $user->id) {
             return response()->json([
                 'message' => 'Operasi ditolak: Demi integritas data, Anda tidak dapat menghapus presensi milik sendiri.',
             ], 403);
+        }
+
+        if ($role !== 'SUPER_ADMIN') {
+            $targetUser = User::find($targetUserId);
+            if ($targetUser && ($targetUser->id === 'usr_super_admin' || strtoupper((string) $targetUser->peran) === 'SUPER_ADMIN')) {
+                return response()->json([
+                    'message' => 'Operasi ditolak: Data presensi Super Administrator tidak dapat dihapus.',
+                ], 403);
+            }
+        }
+
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $date)) {
+            return response()->json(['message' => 'Format tanggal harus YYYY-MM-DD.'], 422);
         }
 
         AttendanceRecord::where('pengguna_id', $targetUserId)

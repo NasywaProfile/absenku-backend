@@ -21,8 +21,17 @@ class ChatController extends Controller
     public function storeTopic(Request $request)
     {
         $user = $request->user();
+        $role = strtoupper((string) ($user->peran ?? ''));
+        $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
 
-        $id = $request->input('id', 'tpc_' . time() . '_' . Str::random(4));
+        $id = (string) $request->input('id', 'tpc_' . time() . '_' . Str::random(6));
+        $existingTopic = ChatTopic::find($id);
+        if ($existingTopic && ! $isAdmin && $existingTopic->dibuat_oleh_id !== $user->id) {
+            return response()->json([
+                'message' => 'Anda tidak berhak menimpa topik diskusi milik pengguna lain.',
+            ], 403);
+        }
+
         $judul = $request->input('judul_topik', $request->input('title', 'Topik Diskusi'));
         $status = $request->input('status_topik', $request->input('status', 'NEED_COMMENTS'));
         $tag = $request->input('id_anggota_ditandai', $request->input('taggedTeammateIds', $request->input('tagged_teammate_ids', [])));
@@ -43,9 +52,9 @@ class ChatController extends Controller
                 'gambar' => $gambar,
                 'catatan_singkat' => $catatanSingkat,
                 'catatan_lengkap' => $catatanLengkap,
-                'dibuat_oleh_id' => $user->id,
-                'dibuat_oleh_nama' => $user->nama,
-                'dibuat_oleh_foto' => $user->foto_profil ?? '',
+                'dibuat_oleh_id' => $existingTopic ? $existingTopic->dibuat_oleh_id : $user->id,
+                'dibuat_oleh_nama' => $existingTopic ? $existingTopic->dibuat_oleh_nama : $user->nama,
+                'dibuat_oleh_foto' => $existingTopic ? $existingTopic->dibuat_oleh_foto : ($user->foto_profil ?? ''),
             ]
         );
 
@@ -142,13 +151,21 @@ class ChatController extends Controller
     public function sendMessage(Request $request)
     {
         $user = $request->user();
+        $role = strtoupper((string) ($user->peran ?? ''));
+        $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
 
         $isi = $request->input('isi_pesan', $request->input('content', $request->input('notes', '')));
         $topikId = $request->input('topik_id', $request->input('topic_id'));
         $kanal = $request->input('kanal', $request->input('channel_id', 'general'));
         $lampiran = $request->input('lampiran', $request->input('attachments', []));
 
-        $msgId = $request->input('id', 'msg_' . time() . '_' . Str::random(4));
+        $msgId = (string) $request->input('id', 'msg_' . time() . '_' . Str::random(6));
+        $existingMsg = ChatMessage::find($msgId);
+        if ($existingMsg && ! $isAdmin && $existingMsg->pengguna_id !== $user->id) {
+            return response()->json([
+                'message' => 'Anda tidak berhak menimpa pesan milik pengguna lain.',
+            ], 403);
+        }
 
         try {
             $penggunaId = $user->id;
@@ -171,13 +188,13 @@ class ChatController extends Controller
                 ['id' => $msgId],
                 [
                     'topik_id' => $topikId,
-                    'pengguna_id' => $penggunaId,
-                    'nama_pengirim' => $user->nama,
-                    'foto_pengirim' => $user->foto_profil,
-                    'peran_pengirim' => $user->peran,
-                    'tipe_kepegawaian' => $user->tipe_kepegawaian ?: 'CONTRACT',
+                    'pengguna_id' => $existingMsg ? $existingMsg->pengguna_id : $penggunaId,
+                    'nama_pengirim' => $existingMsg ? $existingMsg->nama_pengirim : $user->nama,
+                    'foto_pengirim' => $existingMsg ? $existingMsg->foto_pengirim : $user->foto_profil,
+                    'peran_pengirim' => $existingMsg ? $existingMsg->peran_pengirim : $user->peran,
+                    'tipe_kepegawaian' => $existingMsg ? $existingMsg->tipe_kepegawaian : ($user->tipe_kepegawaian ?: 'CONTRACT'),
                     'isi_pesan' => $isi,
-                    'waktu_kirim' => date('H:i'),
+                    'waktu_kirim' => $existingMsg ? $existingMsg->waktu_kirim : now('Asia/Jakarta')->format('H:i'),
                     'kanal' => $kanal,
                     'lampiran' => $lampiran,
                 ]
@@ -188,9 +205,10 @@ class ChatController extends Controller
                 'chat_message' => $message,
             ], 200);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('[ChatController::sendMessage] ' . $e->getMessage());
             return response()->json([
-                'message' => 'Pesan dicatat: ' . $e->getMessage(),
-            ], 200);
+                'message' => 'Gagal menyimpan pesan diskusi.',
+            ], 500);
         }
     }
 
