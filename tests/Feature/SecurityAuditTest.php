@@ -318,7 +318,8 @@ class SecurityAuditTest extends TestCase
         $source = file_get_contents(app_path('Http/Controllers/EmailController.php'));
         $this->assertSame(0, preg_match('/\benv\s*\(/', $source));
 
-        // Simulasikan config sudah di-cache dengan Resend key via Config::set
+        // Simulasikan config sudah di-cache dengan Resend key & mailer aktif via Config::set
+        Config::set('mail.default', 'smtp');
         Config::set('services.resend.key', 'test_resend_key');
         Config::set('services.resend.from_email', 'noreply@indiekraf.test');
         Http::fake([

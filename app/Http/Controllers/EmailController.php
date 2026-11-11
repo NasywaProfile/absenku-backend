@@ -84,6 +84,19 @@ class EmailController extends Controller
             ];
         }
 
+        // Hormati mode testing / log (misal MAIL_MAILER=array di phpunit.xml) agar pengujian tidak mengirim email sungguhan
+        $defaultMailer = strtolower((string) config('mail.default', 'smtp'));
+        if (in_array($defaultMailer, ['array', 'log'], true)) {
+            Log::info("[EmailController] Simulasi pengiriman email ({$defaultMailer}) ke {$to}: {$subject}");
+            return [
+                'status' => 200,
+                'body' => [
+                    'success' => true,
+                    'message' => 'Email notifikasi berhasil dicatat pada mode ' . $defaultMailer . ' untuk ' . $to,
+                ],
+            ];
+        }
+
         $sent = false;
         $errors = [];
 
