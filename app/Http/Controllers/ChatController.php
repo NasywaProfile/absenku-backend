@@ -4,17 +4,22 @@ namespace App\Http\Controllers;
 
 use App\Models\ChatMessage;
 use App\Models\ChatTopic;
+use App\Models\User;
 use App\Support\InputSanitizer;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class ChatController extends Controller
 {
     public function getTopics(Request $request)
     {
+        $user = $request->user();
         $topics = ChatTopic::with('messages')
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->filter(fn (ChatTopic $topic) => ! $this->isHiddenForUser($topic, $user))
+            ->values();
 
         return response()->json($topics);
     }
@@ -141,17 +146,133 @@ class ChatController extends Controller
         $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
 
         $topic = ChatTopic::find($id);
-        if ($topic) {
-            if (! $isAdmin && $topic->dibuat_oleh_id !== $user->id) {
-                return response()->json(['message' => 'Anda tidak berhak menghapus topik diskusi milik pengguna lain.'], 403);
-            }
-            $topic->delete();
+        if (! $topic) {
+            return response()->json([
+                'message' => 'Topik diskusi berhasil dihapus.',
+                'id' => $id,
+                'deleted_permanently' => true,
+            ]);
         }
+
+        if (! $isAdmin && ! $this->isUserParticipantOfTopic($topic, $user)) {
+            return response()->json(['message' => 'Anda tidak berhak menghapus topik diskusi milik pengguna lain.'], 403);
+        }
+
+        if ($this->hasRemainingParticipants($topic, $user)) {
+            if ($this->hasHiddenByColumn()) {
+                $hiddenIds = collect($topic->dihapus_oleh_ids ?? [])
+                    ->map(fn ($item) => (string) $item)
+                    ->push((string) $user->id)
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+                $topic->dihapus_oleh_ids = $hiddenIds;
+                $topic->save();
+            } else {
+                // Fallback safely when migration has not yet been applied on older DB schemas.
+                $userIdentifiers = $this->userIdentifiers($user);
+                $remainingTags = collect($topic->id_anggota_ditandai ?? [])
+                    ->filter(fn ($tag) => ! in_array(strtolower(trim((string) $tag)), $userIdentifiers, true))
+                    ->values()
+                    ->all();
+                $topic->id_anggota_ditandai = $remainingTags;
+                $topic->save();
+            }
+
+            return response()->json([
+                'message' => 'Topik diskusi dihapus dari daftar Anda.',
+                'id' => $id,
+                'deleted_permanently' => false,
+            ]);
+        }
+
+        $topic->delete();
 
         return response()->json([
             'message' => 'Topik diskusi berhasil dihapus.',
             'id' => $id,
+            'deleted_permanently' => true,
         ]);
+    }
+
+    protected function hasHiddenByColumn(): bool
+    {
+        return Schema::hasColumn('topik_diskusi', 'dihapus_oleh_ids');
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function userIdentifiers(User $user): array
+    {
+        return array_values(array_unique(array_filter([
+            strtolower(trim((string) $user->id)),
+            strtolower(trim((string) $user->email)),
+            strtolower(trim((string) $user->nama)),
+        ])));
+    }
+
+    protected function isHiddenForUser(ChatTopic $topic, User $user): bool
+    {
+        $hiddenIds = collect($topic->dihapus_oleh_ids ?? [])
+            ->map(fn ($item) => (string) $item)
+            ->all();
+
+        return in_array((string) $user->id, $hiddenIds, true);
+    }
+
+    protected function isUserParticipantOfTopic(ChatTopic $topic, User $user): bool
+    {
+        if ((string) $topic->dibuat_oleh_id === (string) $user->id) {
+            return true;
+        }
+
+        $userIdentifiers = $this->userIdentifiers($user);
+        foreach ($topic->id_anggota_ditandai ?? [] as $tag) {
+            if (in_array(strtolower(trim((string) $tag)), $userIdentifiers, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function hasRemainingParticipants(ChatTopic $topic, User $actingUser): bool
+    {
+        $hiddenIds = collect($topic->dihapus_oleh_ids ?? [])
+            ->map(fn ($item) => (string) $item)
+            ->push((string) $actingUser->id)
+            ->filter()
+            ->unique()
+            ->all();
+
+        $normalizedTags = collect($topic->id_anggota_ditandai ?? [])
+            ->map(fn ($tag) => strtolower(trim((string) $tag)))
+            ->filter()
+            ->unique()
+            ->all();
+
+        $creatorId = (string) ($topic->dibuat_oleh_id ?? '');
+
+        $users = User::query()->select(['id', 'email', 'nama'])->get();
+        foreach ($users as $candidate) {
+            if (in_array((string) $candidate->id, $hiddenIds, true)) {
+                continue;
+            }
+
+            if ($creatorId !== '' && $creatorId === (string) $candidate->id) {
+                return true;
+            }
+
+            foreach ($this->userIdentifiers($candidate) as $identifier) {
+                if (in_array($identifier, $normalizedTags, true)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     public function getMessages(Request $request)

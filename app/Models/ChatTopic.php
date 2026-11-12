@@ -18,6 +18,7 @@ class ChatTopic extends Model
         'judul_topik',
         'status_topik',
         'id_anggota_ditandai',
+        'dihapus_oleh_ids',
         'berkas',
         'tautan',
         'gambar',
@@ -32,6 +33,7 @@ class ChatTopic extends Model
     {
         return [
             'id_anggota_ditandai' => 'array',
+            'dihapus_oleh_ids' => 'array',
             'berkas' => 'array',
             'tautan' => 'array',
             'gambar' => 'array',
@@ -43,6 +45,8 @@ class ChatTopic extends Model
         'status',
         'tagged_teammate_ids',
         'taggedTeammateIds',
+        'hidden_by_ids',
+        'hiddenByIds',
         'files',
         'links',
         'images',
@@ -73,6 +77,15 @@ class ChatTopic extends Model
             return array_values(array_filter(array_map('trim', explode(',', $val))));
         }
         return is_array($val) ? array_values($val) : [];
+    }
+    public function getHiddenByIdsAttribute()
+    {
+        $val = $this->dihapus_oleh_ids ?? null;
+        if (is_string($val)) {
+            $decoded = json_decode($val, true);
+            $val = is_array($decoded) ? $decoded : [];
+        }
+        return is_array($val) ? array_values(array_map('strval', $val)) : [];
     }
     public function getFilesAttribute() { return $this->berkas ?? []; }
     public function getLinksAttribute() { return $this->tautan ?? []; }
