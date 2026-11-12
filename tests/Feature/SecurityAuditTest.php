@@ -586,4 +586,116 @@ class SecurityAuditTest extends TestCase
             'password' => 'SecretRej123!',
         ])->assertStatus(422);
     }
+
+    public function test_pic_can_create_and_update_kanban_tasks_and_chat_with_valid_attachments(): void
+    {
+        // 1. PIC (ADMIN) membuat tugas Kanban memakai format payload lengkap dari KanbanBoard.tsx
+        Sanctum::actingAs($this->admin);
+
+        $attachments = [
+            [
+                'id' => 'att-1794457191001',
+                'name' => 'Brief Desain Aplikasi.pdf',
+                'type' => 'FILE',
+                'url' => '/storage/uploads/brief.pdf',
+                'fileType' => 'application/pdf',
+                'fileSize' => '1.2 MB',
+                'uploadedBy' => $this->admin->id,
+                'uploadedByName' => $this->admin->nama,
+                'uploadedAt' => '2026-11-12 12:00',
+                'stage' => 'TODO',
+            ],
+            [
+                'id' => 'att-1794457191002',
+                'name' => 'Figma Wireframe',
+                'type' => 'LINK',
+                'url' => 'https://www.figma.com/file/demo123',
+                'uploadedBy' => $this->admin->id,
+                'uploadedByName' => $this->admin->nama,
+                'uploadedAt' => '2026-11-12 12:01',
+                'stage' => 'TODO',
+            ],
+            [
+                'id' => 'att-1794457191003',
+                'name' => 'Referensi Gambar.png',
+                'type' => 'FILE',
+                'url' => 'idb:img_1794457191_abc',
+                'fileType' => 'image/png',
+                'stage' => 'TODO',
+            ],
+        ];
+
+        $createRes = $this->postJson('/api/kanban-tasks', [
+            'id' => 'task-1794457191579',
+            'title' => 'Integrasi Modul Penugasan',
+            'description' => 'Pastikan lampiran dokumen dan link referensi tersimpan aman.',
+            'status' => 'TODO',
+            'priority' => 'HIGH',
+            'assigned_to' => $this->employee->id,
+            'assigned_name' => $this->employee->nama,
+            'assigned_avatar' => 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
+            'assignees' => [
+                [
+                    'id' => $this->employee->id,
+                    'name' => $this->employee->nama,
+                    'department' => 'Engineering',
+                ],
+            ],
+            'due_date' => '2026-11-25',
+            'attachments' => $attachments,
+            'lampiran' => $attachments,
+            'created_by' => $this->admin->id,
+        ])->assertStatus(201);
+
+        $this->assertSame('task-1794457191579', $createRes->json('task.id'));
+        $this->assertSame($this->admin->id, $createRes->json('task.dibuat_oleh'));
+        $this->assertSame($this->admin->id, $createRes->json('task.created_by'));
+        $this->assertCount(3, $createRes->json('task.attachments'));
+
+        // Empty due_date tidak boleh memicu SQL 500 error, dan disimpan sebagai null
+        $noDateRes = $this->postJson('/api/kanban-tasks', [
+            'id' => 'task_1794457192000_abcd',
+            'title' => 'Tugas Tanpa Tenggat Waktu',
+            'assigned_to' => $this->employee->id,
+            'assigned_name' => $this->employee->nama,
+            'due_date' => '',
+            'lampiran' => [],
+        ])->assertStatus(201);
+        $this->assertNull($noDateRes->json('task.tenggat_waktu'));
+
+        // GET /api/kanban-tasks menampilkan kedua tugas tersebut
+        $listRes = $this->getJson('/api/kanban-tasks')->assertStatus(200);
+        $taskIds = collect($listRes->json())->pluck('id')->all();
+        $this->assertContains('task-1794457191579', $taskIds);
+        $this->assertContains('task_1794457192000_abcd', $taskIds);
+
+        // Karyawan yang ditugaskan dapat mengubah status menjadi IN_PROGRESS
+        Sanctum::actingAs($this->employee);
+        $this->putJson('/api/kanban-tasks/task-1794457191579', [
+            'status' => 'IN_PROGRESS',
+        ])->assertStatus(200);
+        $this->assertSame('IN_PROGRESS', KanbanTask::find('task-1794457191579')?->status_tugas);
+
+        // Lampiran XSS pada tugas Kanban tetap wajib ditolak (422)
+        Sanctum::actingAs($this->admin);
+        $this->postJson('/api/kanban-tasks', [
+            'id' => 'task-xss-1',
+            'title' => 'Tugas Berbahaya',
+            'lampiran' => [
+                ['id' => 'att-xss', 'name' => 'bad.html', 'type' => 'FILE', 'url' => 'javascript:alert(1)'],
+            ],
+        ])->assertStatus(422);
+
+        // Topik chat dengan metadata berkas & tautan sah wajib berhasil (200)
+        $this->postJson('/api/chat/topics', [
+            'judul_topik' => 'Diskusi Sprint',
+            'berkas' => [
+                ['id' => 'att-chat-1', 'name' => 'Notulen.pdf', 'type' => 'FILE', 'url' => '/storage/uploads/notulen.pdf'],
+            ],
+            'tautan' => [
+                ['title' => 'Dokumentasi API', 'url' => 'https://example.com/docs'],
+            ],
+            'gambar' => ['https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'],
+        ])->assertStatus(200);
+    }
 }

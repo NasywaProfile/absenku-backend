@@ -63,6 +63,44 @@ class TaskController extends Controller
         ]);
     }
 
+    /**
+     * Menormalisasi input tenggat waktu menjadi format Y-m-d atau null agar aman di strict MySQL DATE.
+     */
+    private function normalizeDueDate(mixed $raw): array
+    {
+        if ($raw === null) {
+            return [true, null];
+        }
+
+        $trimmed = trim((string) $raw);
+        if ($trimmed === '') {
+            return [true, null];
+        }
+
+        if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $trimmed, $matches) === 1) {
+            $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $matches[1]);
+            $errors = \DateTimeImmutable::getLastErrors();
+            $hasErrors = is_array($errors) && ($errors['warning_count'] > 0 || $errors['error_count'] > 0);
+            if ($parsed !== false && ! $hasErrors) {
+                return [true, $matches[1]];
+            }
+        }
+
+        return [false, null];
+    }
+
+    /**
+     * Menjaga batas panjang kolom string VARCHAR MySQL agar tidak memicu SQLSTATE[22001].
+     */
+    private function truncateStr(?string $value, int $maxLen): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return mb_substr(trim($value), 0, $maxLen);
+    }
+
     // ================= Tugas Proyek (Kanban) =================
     public function getKanbanTasks(Request $request)
     {
@@ -80,25 +118,42 @@ class TaskController extends Controller
             ], 403);
         }
 
-        $judul = trim((string) $request->input('judul_tugas', $request->input('title', '')));
+        $judul = trim((string) ($request->input('judul_tugas', $request->input('title', '')) ?? ''));
         if ($judul === '') {
             return response()->json(['message' => 'Judul tugas wajib diisi.'], 422);
         }
-        $deskripsi = $request->input('deskripsi', $request->input('description', ''));
-        $status = strtoupper((string) $request->input('status_tugas', $request->input('status', 'TODO')));
+        $deskripsi = (string) ($request->input('deskripsi', $request->input('description', '')) ?? '');
+        $status = strtoupper((string) ($request->input('status_tugas', $request->input('status', 'TODO')) ?? 'TODO'));
         if (! in_array($status, ['TODO', 'IN_PROGRESS', 'DONE', 'REVIEWED', 'REVISION'], true)) {
             $status = 'TODO';
         }
-        $prioritas = strtoupper((string) $request->input('prioritas', $request->input('priority', 'MEDIUM')));
+        $prioritas = strtoupper((string) ($request->input('prioritas', $request->input('priority', 'MEDIUM')) ?? 'MEDIUM'));
         if (! in_array($prioritas, ['LOW', 'MEDIUM', 'HIGH', 'URGENT'], true)) {
             $prioritas = 'MEDIUM';
         }
-        $ditugaskan = $request->input('ditugaskan_ke', $request->input('assigned_to'));
-        $petugasNama = $request->input('nama_petugas', $request->input('assigned_name'));
+        $ditugaskanRaw = $request->input('ditugaskan_ke', $request->input('assigned_to'));
+        $ditugaskan = $ditugaskanRaw !== null ? $this->truncateStr((string) $ditugaskanRaw, 50) : null;
+        $petugasNamaRaw = $request->input('nama_petugas', $request->input('assigned_name'));
+        $petugasNama = $petugasNamaRaw !== null ? $this->truncateStr((string) $petugasNamaRaw, 255) : null;
         $petugasFoto = $request->input('foto_petugas', $request->input('assigned_avatar'));
         $anggota = $request->input('daftar_anggota', $request->input('assignees', []));
-        $tenggat = $request->input('tenggat_waktu', $request->input('due_date'));
+        if (! is_array($anggota)) {
+            $anggota = [];
+        }
+
+        [$validDueDate, $tenggat] = $this->normalizeDueDate(
+            $request->input('tenggat_waktu', $request->input('due_date'))
+        );
+        if (! $validDueDate) {
+            return response()->json([
+                'message' => 'Format tenggat waktu tidak valid (gunakan YYYY-MM-DD).',
+            ], 422);
+        }
+
         $lampiran = $request->input('lampiran', $request->input('attachments', []));
+        if (! is_array($lampiran)) {
+            $lampiran = [];
+        }
         if (\App\Support\InputSanitizer::findUnsafeMediaUrl($lampiran) !== null
             || (is_string($petugasFoto) && ! \App\Support\InputSanitizer::isSafeMediaUrl($petugasFoto))
         ) {
@@ -107,20 +162,29 @@ class TaskController extends Controller
             ], 422);
         }
 
-        $taskId = $request->input('id', 'tsk_' . time() . '_' . Str::random(4));
+        $taskId = trim((string) ($request->input('id') ?? ''));
+        if ($taskId === '') {
+            $taskId = 'tsk_' . time() . '_' . Str::random(4);
+        } elseif (strlen($taskId) > 50 || preg_match('/^[a-zA-Z0-9._:-]+$/', $taskId) !== 1) {
+            return response()->json(['message' => 'Format ID tugas tidak valid.'], 422);
+        }
+
+        $existingTask = KanbanTask::find($taskId);
 
         $task = KanbanTask::updateOrCreate(
             ['id' => $taskId],
             [
-                'judul_tugas' => $judul,
+                'judul_tugas' => $this->truncateStr($judul, 255) ?? $judul,
                 'deskripsi' => $deskripsi,
                 'status_tugas' => $status,
                 'prioritas' => $prioritas,
                 'ditugaskan_ke' => $ditugaskan,
                 'nama_petugas' => $petugasNama,
-                'foto_petugas' => $petugasFoto,
+                'foto_petugas' => is_string($petugasFoto) ? $petugasFoto : null,
                 'daftar_anggota' => $anggota,
-                'dibuat_oleh' => $user->nama,
+                'dibuat_oleh' => $existingTask && $existingTask->dibuat_oleh
+                    ? $existingTask->dibuat_oleh
+                    : $this->truncateStr((string) $user->id, 100),
                 'tenggat_waktu' => $tenggat,
                 'lampiran' => $lampiran,
             ]
@@ -142,7 +206,9 @@ class TaskController extends Controller
 
         if (! $isAdmin) {
             $assignees = is_array($task->daftar_anggota) ? $task->daftar_anggota : [];
-            $isAssigned = ($task->ditugaskan_ke === $user->id) || in_array($user->id, $assignees, true);
+            $isAssigned = ($task->ditugaskan_ke === $user->id)
+                || in_array($user->id, $assignees, true)
+                || collect($assignees)->contains(fn ($a) => is_array($a) && ($a['id'] ?? null) === $user->id);
             if (! $isAssigned) {
                 return response()->json([
                     'message' => 'Anda tidak memiliki akses untuk mengubah tugas ini.',
@@ -167,6 +233,9 @@ class TaskController extends Controller
         }
         if ($request->has('lampiran') || $request->has('attachments')) {
             $lampiranUpdate = $request->input('lampiran', $request->input('attachments'));
+            if (! is_array($lampiranUpdate)) {
+                $lampiranUpdate = [];
+            }
             if (\App\Support\InputSanitizer::findUnsafeMediaUrl($lampiranUpdate) !== null) {
                 return response()->json([
                     'message' => 'Lampiran tugas mengandung skema URL atau tipe berkas yang tidak diizinkan.',
@@ -177,10 +246,14 @@ class TaskController extends Controller
 
         if ($isAdmin) {
             if ($request->has('deskripsi') || $request->has('description')) {
-                $data['deskripsi'] = $request->input('deskripsi', $request->input('description'));
+                $data['deskripsi'] = (string) ($request->input('deskripsi', $request->input('description')) ?? '');
             }
             if ($request->has('judul_tugas') || $request->has('title')) {
-                $data['judul_tugas'] = $request->input('judul_tugas', $request->input('title'));
+                $judulUpdate = trim((string) ($request->input('judul_tugas', $request->input('title')) ?? ''));
+                if ($judulUpdate === '') {
+                    return response()->json(['message' => 'Judul tugas tidak boleh kosong.'], 422);
+                }
+                $data['judul_tugas'] = $this->truncateStr($judulUpdate, 255);
             }
             if ($request->has('prioritas') || $request->has('priority')) {
                 $reqPrio = strtoupper((string) $request->input('prioritas', $request->input('priority')));
@@ -189,19 +262,36 @@ class TaskController extends Controller
                 }
             }
             if ($request->has('ditugaskan_ke') || $request->has('assigned_to')) {
-                $data['ditugaskan_ke'] = $request->input('ditugaskan_ke', $request->input('assigned_to'));
+                $rawAssignee = $request->input('ditugaskan_ke', $request->input('assigned_to'));
+                $data['ditugaskan_ke'] = $rawAssignee !== null ? $this->truncateStr((string) $rawAssignee, 50) : null;
             }
             if ($request->has('nama_petugas') || $request->has('assigned_name')) {
-                $data['nama_petugas'] = $request->input('nama_petugas', $request->input('assigned_name'));
+                $rawName = $request->input('nama_petugas', $request->input('assigned_name'));
+                $data['nama_petugas'] = $rawName !== null ? $this->truncateStr((string) $rawName, 255) : null;
             }
             if ($request->has('foto_petugas') || $request->has('assigned_avatar')) {
-                $data['foto_petugas'] = $request->input('foto_petugas', $request->input('assigned_avatar'));
+                $fotoUpdate = $request->input('foto_petugas', $request->input('assigned_avatar'));
+                if (is_string($fotoUpdate) && ! \App\Support\InputSanitizer::isSafeMediaUrl($fotoUpdate)) {
+                    return response()->json([
+                        'message' => 'URL foto petugas tidak valid atau tidak diizinkan.',
+                    ], 422);
+                }
+                $data['foto_petugas'] = is_string($fotoUpdate) ? $fotoUpdate : null;
             }
             if ($request->has('daftar_anggota') || $request->has('assignees')) {
-                $data['daftar_anggota'] = $request->input('daftar_anggota', $request->input('assignees'));
+                $anggotaUpdate = $request->input('daftar_anggota', $request->input('assignees'));
+                $data['daftar_anggota'] = is_array($anggotaUpdate) ? $anggotaUpdate : [];
             }
             if ($request->has('tenggat_waktu') || $request->has('due_date')) {
-                $data['tenggat_waktu'] = $request->input('tenggat_waktu', $request->input('due_date'));
+                [$validDue, $tenggatUpdate] = $this->normalizeDueDate(
+                    $request->input('tenggat_waktu', $request->input('due_date'))
+                );
+                if (! $validDue) {
+                    return response()->json([
+                        'message' => 'Format tenggat waktu tidak valid (gunakan YYYY-MM-DD).',
+                    ], 422);
+                }
+                $data['tenggat_waktu'] = $tenggatUpdate;
             }
         }
 

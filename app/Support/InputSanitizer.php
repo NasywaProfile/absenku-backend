@@ -8,7 +8,46 @@ class InputSanitizer
      * MIME type allowlist untuk inline base64 Data URL pada lampiran/profil.
      * HTML, SVG, XML, dan JavaScript dilarang keras untuk mencegah Stored XSS.
      */
-    private const SAFE_DATA_URL_RE = '/^data:(?:image\/(?:png|jpe?g|webp|gif|bmp|avif)|application\/pdf|video\/(?:mp4|webm|quicktime|x-matroska)|application\/(?:msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|vnd\.ms-powerpoint|vnd\.openxmlformats-officedocument\.presentationml\.presentation|zip|x-zip-compressed|octet-stream)|text\/(?:plain|csv))(?:;[a-zA-Z0-9=._+-]+)*;base64,/i';
+    private const SAFE_DATA_URL_RE = '/^data:(?:image\/(?:png|jpe?g|webp|gif|bmp|avif|x-icon)|application\/(?:pdf|x-pdf|cdfv2)|video\/(?:mp4|webm|quicktime|x-matroska)|application\/(?:msword|vnd\.openxmlformats-officedocument\.wordprocessingml\.document|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|vnd\.ms-powerpoint|vnd\.openxmlformats-officedocument\.presentationml\.presentation|zip|x-zip-compressed|octet-stream|csv)|text\/(?:plain|csv|comma-separated-values))(?:;[a-zA-Z0-9=._+-]+)*;base64,/i';
+
+    /**
+     * Nama kunci payload yang nilainya harus divalidasi ketat sebagai URL media/tautan.
+     */
+    private const URL_FIELD_KEYS = [
+        'url',
+        'href',
+        'src',
+        'link',
+        'data',
+        'fileurl',
+        'file_url',
+        'previewurl',
+        'preview_url',
+        'attachmentdata',
+        'attachment_data',
+        'data_lampiran',
+        'uri',
+        'foto',
+        'avatar',
+        'foto_profil',
+        'foto_petugas',
+    ];
+
+    /**
+     * Memastikan string biasa (non-URL seperti nama/id/stage lampiran) tidak menyisipkan skema eksekusi skrip.
+     */
+    private static function hasDangerousScriptScheme(string $value): bool
+    {
+        $clean = preg_replace('/[\x00-\x1F\x7F]+/', '', trim($value)) ?? '';
+        if ($clean === '') {
+            return false;
+        }
+
+        return preg_match(
+            '/^\s*(?:javascript|vbscript):|^\s*data:[^,]*(?:html|svg|xml|script|ecmascript)/i',
+            $clean
+        ) === 1;
+    }
 
     /**
      * Memastikan URL lampiran, avatar, atau tautan menggunakan skema yang aman.
@@ -58,8 +97,17 @@ class InputSanitizer
      */
     public static function findUnsafeMediaUrl(mixed $payload): ?string
     {
+        return self::walkMediaPayload($payload, true);
+    }
+
+    private static function walkMediaPayload(mixed $payload, bool $expectUrl): ?string
+    {
         if (is_string($payload)) {
-            return self::isSafeMediaUrl($payload) ? null : $payload;
+            if ($expectUrl) {
+                return self::isSafeMediaUrl($payload) ? null : $payload;
+            }
+
+            return self::hasDangerousScriptScheme($payload) ? $payload : null;
         }
 
         if (! is_array($payload)) {
@@ -67,12 +115,12 @@ class InputSanitizer
         }
 
         foreach ($payload as $key => $item) {
-            if (is_string($key) && in_array(strtolower($key), ['url', 'href', 'src', 'link', 'data', 'fileurl', 'previewurl'], true)) {
-                if (is_string($item) && ! self::isSafeMediaUrl($item)) {
-                    return $item;
-                }
-            } elseif (is_array($item) || is_string($item)) {
-                $unsafe = self::findUnsafeMediaUrl($item);
+            $childExpectsUrl = is_int($key)
+                ? true
+                : in_array(strtolower((string) $key), self::URL_FIELD_KEYS, true);
+
+            if (is_array($item) || is_string($item)) {
+                $unsafe = self::walkMediaPayload($item, $childExpectsUrl);
                 if ($unsafe !== null) {
                     return $unsafe;
                 }
