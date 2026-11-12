@@ -449,9 +449,10 @@ class SecurityAuditTest extends TestCase
     public function test_no_hardcoded_default_passwords_in_seeder_and_superadmin_rotation_plus_backup_work(): void
     {
         $seederSource = (string) file_get_contents(database_path('seeders/DatabaseSeeder.php'));
-        $this->assertStringNotContainsString('SuperAdminabsenkuMantap', $seederSource);
+        $this->assertDoesNotMatchRegularExpression('/@gmail\.com/i', $seederSource);
+        $this->assertStringContainsString("config('absenku.seed_super_admin_email')", $seederSource);
+        $this->assertStringContainsString("config('absenku.seed_super_admin_password')", $seederSource);
         $this->assertStringNotContainsString('Password123!', $seederSource);
-        $this->assertStringNotContainsString('nasywadavina384@gmail.com', $seederSource);
 
         // Token lama Super Admin harus hangus setelah kredensial diganti lewat absenku:set-superadmin
         $oldToken = $this->superAdmin->createToken('old-session', ['*'])->plainTextToken;
@@ -498,5 +499,91 @@ class SecurityAuditTest extends TestCase
             Config::set('database.default', $origDefaultConn);
             File::delete($tmpSqlite);
         }
+    }
+
+    public function test_xss_url_sanitization_token_revocation_and_secret_hygiene(): void
+    {
+        // 1. Pastikan tidak ada lagi alamat email pribadi tertinggal di controller/seeder/backup command
+        $leaveCtrlSrc = (string) file_get_contents(app_path('Http/Controllers/LeaveController.php'));
+        $this->assertDoesNotMatchRegularExpression('/@gmail\.com/i', $leaveCtrlSrc);
+
+        // 2. Pastikan masa berlaku token Sanctum terkonfigurasi eksplisit (tidak null / selamanya)
+        $this->assertIsInt(config('sanctum.expiration'));
+        $this->assertGreaterThan(0, config('sanctum.expiration'));
+
+        // 3. Tolak payload Stored-XSS (data:text/html, data:image/svg+xml, javascript:) di semua endpoint media/lampiran
+        Sanctum::actingAs($this->employee);
+
+        $this->postJson('/api/leaves', [
+            'kategori_izin' => 'SICK',
+            'tanggal_mulai' => '2026-11-20',
+            'tanggal_selesai' => '2026-11-20',
+            'alasan' => 'Sakit demam',
+            'data_lampiran' => 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+        ])->assertStatus(422);
+
+        $this->postJson('/api/chat/topics', [
+            'judul_topik' => 'Topik XSS',
+            'tautan' => [['title' => 'Klik', 'url' => 'javascript:alert(document.cookie)']],
+        ])->assertStatus(422);
+
+        $this->postJson('/api/chat/messages', [
+            'isi_pesan' => 'Cek lampiran',
+            'lampiran' => [['name' => 'bad.svg', 'url' => 'data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9ImFsZXJ0KDEpIj48L3N2Zz4=']],
+        ])->assertStatus(422);
+
+        $this->postJson('/api/profile', [
+            'nama' => 'Budi Santoso',
+            'foto_profil' => 'javascript:alert(1)',
+        ])->assertStatus(422);
+
+        // 4. Perubahan password lewat /api/profile wajib menghanguskan token Sanctum lama & menerbitkan token baru
+        $loginRes = $this->postJson('/api/login', [
+            'email' => $this->employee->email,
+            'password' => 'SecretEmp123!',
+        ])->assertStatus(200);
+        $oldBearer = $loginRes->json('token');
+        $this->assertNotEmpty($oldBearer);
+
+        $updateRes = $this->withToken($oldBearer)->postJson('/api/profile', [
+            'nama' => 'Budi Santoso',
+            'password' => 'NewSecretEmp#2026',
+        ])->assertStatus(200);
+        $newBearer = $updateRes->json('token');
+        $this->assertNotEmpty($newBearer);
+        $this->assertNotSame($oldBearer, $newBearer);
+
+        // Reset auth guards internal test agar token DB benar-benar diverifikasi ulang
+        $this->app['auth']->forgetGuards();
+        $this->withToken($oldBearer)->getJson('/api/me')->assertStatus(401);
+        $this->app['auth']->forgetGuards();
+        $this->withToken($newBearer)->getJson('/api/me')->assertStatus(200);
+
+        // 5. Email gagal tidak membocorkan detail error internal SMTP/Resend ke klien
+        Config::set('mail.default', 'smtp');
+        Config::set('mail.mailers.smtp.username', '');
+        Config::set('mail.mailers.smtp.password', '');
+        $failDispatch = app(EmailController::class)->dispatchEmail([
+            'to' => 'employee@indiekraf.test',
+            'subject' => 'Uji Kegagalan',
+            'text' => 'Tes',
+        ]);
+        $this->assertSame(500, $failDispatch['status']);
+        $this->assertArrayNotHasKey('errors', $failDispatch['body']);
+
+        // 6. Registrasi ulang email berstatus REJECTED mengembalikan 422 rapi (bukan 500 SQL duplicate)
+        User::create([
+            'id' => 'usr_rejected_1',
+            'nama' => 'Ditolak User',
+            'email' => 'rejected@indiekraf.test',
+            'password' => Hash::make('SecretRej123!'),
+            'peran' => 'EMPLOYEE',
+            'status' => 'REJECTED',
+        ]);
+        $this->postJson('/api/register', [
+            'nama' => 'Daftar Ulang',
+            'email' => 'rejected@indiekraf.test',
+            'password' => 'SecretRej123!',
+        ])->assertStatus(422);
     }
 }

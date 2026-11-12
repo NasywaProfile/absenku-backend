@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\LeaveRequest;
 use App\Models\User;
+use App\Support\InputSanitizer;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Mail;
@@ -64,6 +65,12 @@ class LeaveController extends Controller
         $dataLampiran = $request->input('data_lampiran', $request->input('attachment_data'));
         $tipeLampiran = $request->input('tipe_lampiran', $request->input('attachment_type'));
 
+        if (is_string($dataLampiran) && ! InputSanitizer::isSafeMediaUrl($dataLampiran)) {
+            return response()->json([
+                'message' => 'Format lampiran tidak valid atau menggunakan tipe konten yang dilarang.',
+            ], 422);
+        }
+
         // Cek dan cegah duplikasi perizinan yang sama persis
         $existing = LeaveRequest::where('pengguna_id', $user->id)
             ->where('tanggal_mulai', $tglMulai)
@@ -101,7 +108,7 @@ class LeaveController extends Controller
             'waktu_pengajuan' => date('Y-m-d H:i'),
         ]);
 
-        // Kirim Notifikasi Email Otomatis ke Super Admin / Admin via Gmail SMTP
+        // Kirim Notifikasi Email Otomatis ke Super Admin / Admin via konfigurasi sistem atau DB
         try {
             $kategoriLabels = [
                 'LEAVE' => 'Izin / Cuti Tahunan',
@@ -112,14 +119,21 @@ class LeaveController extends Controller
             ];
             $labelKategori = $kategoriLabels[$kategori] ?? $kategori;
 
-            $recipientEmail = config('mail.from.address', 'naswa.wijaya31@gmail.com');
+            $configuredFrom = trim((string) config('mail.from.address', ''));
+            $recipientEmail = ($configuredFrom !== '' && strtolower($configuredFrom) !== 'hello@example.com')
+                ? $configuredFrom
+                : (string) (User::where('peran', 'SUPER_ADMIN')->where('status', 'ACTIVE')->value('email')
+                    ?: User::where('peran', 'ADMIN')->where('status', 'ACTIVE')->value('email')
+                    ?: '');
 
-            $appUrl = rtrim((string) config('app.url', ''), '/');
-            $panelLinkHtml = $appUrl !== ''
-                ? "<div style='margin-top: 15px;'><a href='{$appUrl}' style='background-color: #0284c7; color: white; padding: 10px 18px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;'>Buka Panel Absenku</a></div>"
-                : '';
+            if ($recipientEmail !== '') {
+                $appUrl = rtrim((string) config('app.url', ''), '/');
+                $escapedAppUrl = e($appUrl);
+                $panelLinkHtml = $appUrl !== ''
+                    ? "<div style='margin-top: 15px;'><a href='{$escapedAppUrl}' style='background-color: #0284c7; color: white; padding: 10px 18px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;'>Buka Panel Absenku</a></div>"
+                    : '';
 
-            $htmlContent = "
+                $htmlContent = "
             <div style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;'>
                 <div style='background-color: #0284c7; color: white; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px;'>
                     <h2 style='margin: 0; font-size: 18px;'>Pemberitahuan Pengajuan Izin Baru</h2>
@@ -161,12 +175,13 @@ class LeaveController extends Controller
                 <p style='font-size: 12px; color: #64748b; margin: 0;'>Pesan ini dikirimkan otomatis oleh sistem Absenku.</p>
             </div>";
 
-            app(EmailController::class)->dispatchEmail([
-                'to' => $recipientEmail,
-                'subject' => "[in-Time] Pengajuan {$labelKategori} Baru - {$user->nama}",
-                'html' => $htmlContent,
-                'text' => "Pemberitahuan Pengajuan Izin Baru: {$user->nama} ({$labelKategori}) dari {$tglMulai} s.d. {$tglSelesai}.",
-            ]);
+                app(EmailController::class)->dispatchEmail([
+                    'to' => $recipientEmail,
+                    'subject' => "[in-Time] Pengajuan {$labelKategori} Baru - {$user->nama}",
+                    'html' => $htmlContent,
+                    'text' => "Pemberitahuan Pengajuan Izin Baru: {$user->nama} ({$labelKategori}) dari {$tglMulai} s.d. {$tglSelesai}.",
+                ]);
+            }
         } catch (\Throwable $mailErr) {
             \Illuminate\Support\Facades\Log::warning('Gagal mengirimkan notifikasi email pengajuan izin: ' . $mailErr->getMessage());
         }

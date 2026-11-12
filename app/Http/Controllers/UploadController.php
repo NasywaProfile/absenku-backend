@@ -99,13 +99,23 @@ class UploadController extends Controller
             ], 422);
         }
 
-        // Tolak berkas teks/gambar polyglot yang menyisipkan tag eksekusi PHP atau <script
+        // Tolak berkas teks/gambar polyglot yang menyisipkan tag eksekusi PHP atau <script di seluruh isi berkas
         if (in_array($rule['category'], ['image', 'document'], true) && $extension !== 'zip' && $realPath && is_file($realPath)) {
-            $sample = (string) @file_get_contents($realPath, false, null, 0, 8192);
-            if (preg_match('/<\?(php|=)|<script\b/i', $sample)) {
-                return response()->json([
-                    'message' => 'Berkas mengandung konten skrip berbahaya dan ditolak.',
-                ], 422);
+            $handle = @fopen($realPath, 'rb');
+            if ($handle !== false) {
+                $carry = '';
+                while (! feof($handle)) {
+                    $chunk = (string) fread($handle, 65536);
+                    $window = $carry . $chunk;
+                    if (preg_match('/<\?(php|=)|<script\b/i', $window)) {
+                        fclose($handle);
+                        return response()->json([
+                            'message' => 'Berkas mengandung konten skrip berbahaya dan ditolak.',
+                        ], 422);
+                    }
+                    $carry = substr($window, -32);
+                }
+                fclose($handle);
             }
         }
 

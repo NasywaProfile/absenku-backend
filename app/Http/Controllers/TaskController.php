@@ -99,6 +99,13 @@ class TaskController extends Controller
         $anggota = $request->input('daftar_anggota', $request->input('assignees', []));
         $tenggat = $request->input('tenggat_waktu', $request->input('due_date'));
         $lampiran = $request->input('lampiran', $request->input('attachments', []));
+        if (\App\Support\InputSanitizer::findUnsafeMediaUrl($lampiran) !== null
+            || (is_string($petugasFoto) && ! \App\Support\InputSanitizer::isSafeMediaUrl($petugasFoto))
+        ) {
+            return response()->json([
+                'message' => 'Lampiran tugas mengandung skema URL atau tipe berkas yang tidak diizinkan.',
+            ], 422);
+        }
 
         $taskId = $request->input('id', 'tsk_' . time() . '_' . Str::random(4));
 
@@ -159,7 +166,13 @@ class TaskController extends Controller
             $data['status_tugas'] = $reqStatus;
         }
         if ($request->has('lampiran') || $request->has('attachments')) {
-            $data['lampiran'] = $request->input('lampiran', $request->input('attachments'));
+            $lampiranUpdate = $request->input('lampiran', $request->input('attachments'));
+            if (\App\Support\InputSanitizer::findUnsafeMediaUrl($lampiranUpdate) !== null) {
+                return response()->json([
+                    'message' => 'Lampiran tugas mengandung skema URL atau tipe berkas yang tidak diizinkan.',
+                ], 422);
+            }
+            $data['lampiran'] = $lampiranUpdate;
         }
 
         if ($isAdmin) {

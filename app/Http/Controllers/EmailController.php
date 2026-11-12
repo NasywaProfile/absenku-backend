@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Support\InputSanitizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -50,10 +51,14 @@ class EmailController extends Controller
             }
         }
 
+        $safeHtml = ! empty($validated['html'])
+            ? InputSanitizer::sanitizeEmailHtml($validated['html'])
+            : '';
+
         $result = $this->dispatchEmail([
             'to' => $validated['to'],
             'subject' => $validated['subject'],
-            'html' => $validated['html'] ?? '',
+            'html' => $safeHtml,
             'text' => $validated['text'] ?? '',
         ]);
 
@@ -70,7 +75,7 @@ class EmailController extends Controller
     public function dispatchEmail(array $payload): array
     {
         $to = trim((string) ($payload['to'] ?? ''));
-        $subject = trim((string) ($payload['subject'] ?? ''));
+        $subject = trim((string) preg_replace('/[\r\n]+/', ' ', (string) ($payload['subject'] ?? '')));
         $html = (string) ($payload['html'] ?? '');
         $text = (string) ($payload['text'] ?? '');
 
@@ -195,12 +200,16 @@ class EmailController extends Controller
             ];
         }
 
+        Log::error('[EmailController] Semua provider email gagal mengirim notifikasi', [
+            'to' => $to,
+            'errors' => $errors,
+        ]);
+
         return [
             'status' => 500,
             'body' => [
                 'success' => false,
                 'message' => 'Gagal mengirim email notifikasi.',
-                'errors' => $errors,
             ],
         ];
     }

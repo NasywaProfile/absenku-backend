@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Support\InputSanitizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -11,6 +12,25 @@ use Illuminate\Support\Str;
 
 class AuthController extends Controller
 {
+    private function findTargetUser(string $id, ?string $fallbackEmail = null): ?User
+    {
+        $byId = User::where('id', $id)->first();
+        if ($byId) {
+            return $byId;
+        }
+
+        $byPathEmail = User::whereRaw('LOWER(email) = ?', [strtolower(trim($id))])->first();
+        if ($byPathEmail) {
+            return $byPathEmail;
+        }
+
+        if ($fallbackEmail !== null && trim($fallbackEmail) !== '') {
+            return User::whereRaw('LOWER(email) = ?', [strtolower(trim($fallbackEmail))])->first();
+        }
+
+        return null;
+    }
+
     public function register(Request $request)
     {
         $validated = $request->validate([
@@ -52,6 +72,9 @@ class AuthController extends Controller
                     'message' => 'Alamat email ini sudah terdaftar dan sedang dalam antrean persetujuan Administrator.',
                 ], 422);
             }
+            return response()->json([
+                'message' => 'Alamat email ini sudah pernah terdaftar dan tidak aktif. Silakan hubungi Administrator.',
+            ], 422);
         }
 
         $userId = 'usr_' . time() . '_' . Str::random(6);
@@ -201,6 +224,11 @@ class AuthController extends Controller
         $nama = $request->input('nama', $request->input('name', $user->nama));
         $email = $request->input('email', $user->email);
         $foto = $request->input('foto_profil', $request->input('avatar', $user->foto_profil));
+        if (is_string($foto) && ! InputSanitizer::isSafeMediaUrl($foto)) {
+            return response()->json([
+                'message' => 'Format foto profil tidak valid atau menggunakan skema URL yang dilarang.',
+            ], 422);
+        }
         $telepon = $request->input('nomor_telepon', $request->input('phone', $user->nomor_telepon));
         $divisi = $request->input('divisi', $request->input('department', $user->divisi));
         $jabatan = $request->input('jabatan', $request->input('position', $user->jabatan));
@@ -259,15 +287,21 @@ class AuthController extends Controller
         }
 
         // Update kata sandi baru jika dikirim
+        $passwordChanged = false;
         if ($request->has('password') && ! empty($request->password)) {
             $rawPass = (string) $request->password;
             if (strlen($rawPass) < 6) {
                 return response()->json(['message' => 'Password minimal terdiri dari 6 karakter.'], 422);
             }
             $data['password'] = Hash::make($rawPass);
+            $passwordChanged = true;
         }
 
         $user->update($data);
+        if ($passwordChanged) {
+            // Cabut seluruh token lama agar sesi yang berpotensi bocor langsung hangus saat password diganti
+            $user->tokens()->delete();
+        }
         $freshUser = $user->fresh();
 
         $responsePayload = [
@@ -378,12 +412,7 @@ class AuthController extends Controller
         }
 
         $email = $request->input('email', $request->json('email'));
-        $user = User::where('id', $id)
-            ->orWhere('email', $id)
-            ->when($email, function ($query) use ($email) {
-                return $query->orWhere('email', $email);
-            })
-            ->first();
+        $user = $this->findTargetUser((string) $id, is_string($email) ? $email : null);
         if (! $user) {
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
@@ -410,12 +439,16 @@ class AuthController extends Controller
         $user->tokens()->where('name', 'pending-token')->delete();
 
         $appUrl = rtrim((string) config('app.url', ''), '/');
+        $escapedAppUrl = e($appUrl);
         $portalCtaHtml = $appUrl !== ''
-            ? "<div style='text-align:center;margin:28px 0 16px 0;'><a href='{$appUrl}' style='background-color:#1E3A8A;color:#ffffff;padding:12px 26px;font-size:13px;font-weight:700;text-decoration:none;border-radius:10px;display:inline-block;'>Buka Portal in-Time &rarr;</a></div>"
+            ? "<div style='text-align:center;margin:28px 0 16px 0;'><a href='{$escapedAppUrl}' style='background-color:#1E3A8A;color:#ffffff;padding:12px 26px;font-size:13px;font-weight:700;text-decoration:none;border-radius:10px;display:inline-block;'>Buka Portal in-Time &rarr;</a></div>"
             : '';
 
         try {
             $roleLabel = $user->peran === 'SUPER_ADMIN' ? 'Superadmin' : ($user->peran === 'ADMIN' ? 'Admin' : 'Karyawan');
+            $safeNama = e($user->nama);
+            $safeEmail = e($user->email);
+            $safeRoleLabel = e($roleLabel);
             app(EmailController::class)->dispatchEmail([
                 'to' => $user->email,
                 'subject' => "Akun Terverifikasi: Selamat Datang di in-Time, {$user->nama}!",
@@ -425,12 +458,12 @@ class AuthController extends Controller
                     . "<h2 style='margin:0;font-size:18px;'>Pendaftaran Akun Telah Disetujui</h2>"
                     . "</div>"
                     . "<div style='padding:24px 28px;'>"
-                    . "<p style='font-size:14px;color:#1e293b;line-height:1.6;'>Halo <strong>{$user->nama}</strong>,</p>"
+                    . "<p style='font-size:14px;color:#1e293b;line-height:1.6;'>Halo <strong>{$safeNama}</strong>,</p>"
                     . "<p style='font-size:14px;color:#334155;line-height:1.6;'>Pendaftaran akun Anda pada platform in-Time telah resmi disetujui. Akun Anda saat ini sudah aktif dan dapat langsung digunakan untuk presensi dan manajemen tugas.</p>"
                     . "<table style='width:100%;border-collapse:collapse;margin:20px 0;'>"
-                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;width:35%;font-size:13px;'>Nama Pengguna:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$user->nama}</td></tr>"
-                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Email Terdaftar:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$user->email}</td></tr>"
-                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Peran Akun:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$roleLabel}</td></tr>"
+                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;width:35%;font-size:13px;'>Nama Pengguna:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$safeNama}</td></tr>"
+                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Email Terdaftar:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$safeEmail}</td></tr>"
+                    . "<tr style='border-bottom:1px solid #f1f5f9;'><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Peran Akun:</td><td style='padding:10px 0;color:#0f172a;font-size:13px;'>{$safeRoleLabel}</td></tr>"
                     . "<tr><td style='padding:10px 0;font-weight:600;color:#475569;font-size:13px;'>Status Akun:</td><td style='padding:10px 0;color:#16a34a;font-weight:bold;font-size:13px;'>Aktif (Terverifikasi)</td></tr>"
                     . "</table>"
                     . $portalCtaHtml
@@ -461,7 +494,7 @@ class AuthController extends Controller
 
         $reason = $request->input('alasan', $request->input('reason'));
 
-        $user = User::where('id', $id)->orWhere('email', $id)->first();
+        $user = $this->findTargetUser((string) $id);
         if (! $user) {
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
@@ -501,12 +534,7 @@ class AuthController extends Controller
         }
 
         $email = $request->input('email', $request->json('email'));
-        $user = User::where('id', $id)
-            ->orWhere('email', $id)
-            ->when($email, function ($query) use ($email) {
-                return $query->orWhere('email', $email);
-            })
-            ->first();
+        $user = $this->findTargetUser((string) $id, is_string($email) ? $email : null);
         if (! $user) {
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
@@ -549,12 +577,7 @@ class AuthController extends Controller
         }
 
         $email = $request->input('email', $request->json('email'));
-        $user = User::where('id', $id)
-            ->orWhere('email', $id)
-            ->when($email, function ($query) use ($email) {
-                return $query->orWhere('email', $email);
-            })
-            ->first();
+        $user = $this->findTargetUser((string) $id, is_string($email) ? $email : null);
         if (! $user) {
             return response()->json(['message' => 'User tidak ditemukan.'], 404);
         }
@@ -588,7 +611,7 @@ class AuthController extends Controller
             ], 403);
         }
 
-        $user = User::where('id', $id)->orWhere('email', $id)->first();
+        $user = $this->findTargetUser((string) $id);
         if (! $user) {
             return response()->json([
                 'message' => 'User sudah tidak ada di sistem database.',
@@ -648,8 +671,9 @@ class AuthController extends Controller
             ], 200);
         } catch (\Throwable $e) {
             DB::rollBack();
+            Log::error('[AuthController::deleteUser] ' . $e->getMessage());
             return response()->json([
-                'message' => 'Gagal menghapus karyawan: ' . $e->getMessage(),
+                'message' => 'Gagal menghapus karyawan.',
             ], 500);
         }
     }
