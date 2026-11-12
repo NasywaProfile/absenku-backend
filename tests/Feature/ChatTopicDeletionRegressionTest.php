@@ -74,16 +74,43 @@ class ChatTopicDeletionRegressionTest extends TestCase
         $topicsA = $this->getJson('/api/chat/topics')->assertOk()->json();
         $this->assertCount(0, $topicsA);
 
-        // Account B still sees the topic and its messages.
+        // Account B still sees the topic and its messages, and Account A is removed from active tags.
         Sanctum::actingAs($accountB);
         $topicsB = $this->getJson('/api/chat/topics')->assertOk()->json();
         $this->assertCount(1, $topicsB);
         $this->assertSame('topic_shared_ab', $topicsB[0]['id']);
         $this->assertSame('usr_chat_a', $topicsB[0]['dibuat_oleh_id']);
+        $this->assertNotContains('usr_chat_a', $topicsB[0]['id_anggota_ditandai']);
+        $this->assertContains('usr_chat_b', $topicsB[0]['id_anggota_ditandai']);
         $this->assertCount(1, $topicsB[0]['messages']);
         $this->assertSame('Halo Akun B, cek file ini ya.', $topicsB[0]['messages'][0]['isi_pesan']);
 
-        // When Account B also deletes it, no participants remain -> permanently deleted.
+        // Non-participant Account C cannot update/tag the topic.
+        Sanctum::actingAs($accountC);
+        $this->putJson('/api/chat/topics/topic_shared_ab', [
+            'tagged_teammate_ids' => ['usr_chat_b', 'usr_chat_c'],
+        ])->assertStatus(403);
+
+        // Account B (tagged EMPLOYEE) CAN re-add Account A back into Assignees!
+        Sanctum::actingAs($accountB);
+        $reinviteRes = $this->putJson('/api/chat/topics/topic_shared_ab', [
+            'taggedTeammateIds' => ['usr_chat_b', 'b@absenku.test', 'Akun B', 'usr_chat_a', 'a@absenku.test', 'Akun A'],
+        ]);
+        $reinviteRes->assertOk();
+
+        // Account A immediately sees the room and old messages again!
+        Sanctum::actingAs($accountA);
+        $topicsAUpdated = $this->getJson('/api/chat/topics')->assertOk()->json();
+        $this->assertCount(1, $topicsAUpdated);
+        $this->assertSame('topic_shared_ab', $topicsAUpdated[0]['id']);
+        $this->assertCount(1, $topicsAUpdated[0]['messages']);
+
+        // Now A deletes again, then B also deletes -> no participants remain -> permanently deleted.
+        $this->deleteJson('/api/chat/topics/topic_shared_ab')
+            ->assertOk()
+            ->assertJson(['deleted_permanently' => false]);
+
+        Sanctum::actingAs($accountB);
         $delBRes = $this->deleteJson('/api/chat/topics/topic_shared_ab');
         $delBRes->assertOk();
         $delBRes->assertJson([

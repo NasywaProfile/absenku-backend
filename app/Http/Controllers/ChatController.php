@@ -89,7 +89,7 @@ class ChatController extends Controller
         $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
 
         $topic = ChatTopic::findOrFail($id);
-        if (! $isAdmin && $topic->dibuat_oleh_id !== $user->id) {
+        if (! $isAdmin && (! $this->isUserParticipantOfTopic($topic, $user) || $this->isHiddenForUser($topic, $user))) {
             return response()->json(['message' => 'Anda tidak berhak mengubah topik diskusi milik pengguna lain.'], 403);
         }
 
@@ -101,7 +101,21 @@ class ChatController extends Controller
             $data['status_topik'] = $request->input('status_topik', $request->input('status'));
         }
         if ($request->has('id_anggota_ditandai') || $request->has('taggedTeammateIds') || $request->has('tagged_teammate_ids')) {
-            $data['id_anggota_ditandai'] = $request->input('id_anggota_ditandai', $request->input('taggedTeammateIds', $request->input('tagged_teammate_ids')));
+            $nextTags = $request->input('id_anggota_ditandai', $request->input('taggedTeammateIds', $request->input('tagged_teammate_ids')));
+            $nextTagsList = is_array($nextTags) ? array_values($nextTags) : [];
+            $data['id_anggota_ditandai'] = $nextTagsList;
+
+            // If an active user is re-tagged/invited back, remove them from hidden list so the room reappears.
+            if ($this->hasHiddenByColumn() && ! empty($topic->dihapus_oleh_ids)) {
+                $reinvitedUserIds = $this->resolveUserIdsMatchingTags($nextTagsList);
+                if (! empty($reinvitedUserIds)) {
+                    $data['dihapus_oleh_ids'] = collect($topic->dihapus_oleh_ids)
+                        ->map(fn ($hiddenId) => (string) $hiddenId)
+                        ->reject(fn ($hiddenId) => in_array($hiddenId, $reinvitedUserIds, true))
+                        ->values()
+                        ->all();
+                }
+            }
         }
         if ($request->has('berkas') || $request->has('files')) {
             $berkas = $request->input('berkas', $request->input('files'));
@@ -159,6 +173,13 @@ class ChatController extends Controller
         }
 
         if ($this->hasRemainingParticipants($topic, $user)) {
+            $userIdentifiers = $this->userIdentifiers($user);
+            $remainingTags = collect($this->extractTaggedList($topic))
+                ->filter(fn ($tag) => ! in_array(strtolower(trim((string) $tag)), $userIdentifiers, true))
+                ->values()
+                ->all();
+            $topic->id_anggota_ditandai = $remainingTags;
+
             if ($this->hasHiddenByColumn()) {
                 $hiddenIds = collect($topic->dihapus_oleh_ids ?? [])
                     ->map(fn ($item) => (string) $item)
@@ -168,17 +189,8 @@ class ChatController extends Controller
                     ->values()
                     ->all();
                 $topic->dihapus_oleh_ids = $hiddenIds;
-                $topic->save();
-            } else {
-                // Fallback safely when migration has not yet been applied on older DB schemas.
-                $userIdentifiers = $this->userIdentifiers($user);
-                $remainingTags = collect($topic->id_anggota_ditandai ?? [])
-                    ->filter(fn ($tag) => ! in_array(strtolower(trim((string) $tag)), $userIdentifiers, true))
-                    ->values()
-                    ->all();
-                $topic->id_anggota_ditandai = $remainingTags;
-                $topic->save();
             }
+            $topic->save();
 
             return response()->json([
                 'message' => 'Topik diskusi dihapus dari daftar Anda.',
@@ -199,6 +211,56 @@ class ChatController extends Controller
     protected function hasHiddenByColumn(): bool
     {
         return Schema::hasColumn('topik_diskusi', 'dihapus_oleh_ids');
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function extractTaggedList(ChatTopic $topic): array
+    {
+        $val = $topic->id_anggota_ditandai;
+        if (is_array($val)) {
+            return array_values($val);
+        }
+        $raw = $topic->getRawOriginal('id_anggota_ditandai');
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                return array_values($decoded);
+            }
+            return array_values(array_filter(array_map('trim', explode(',', $raw))));
+        }
+
+        return [];
+    }
+
+    /**
+     * @param array<int, mixed> $tags
+     * @return list<string>
+     */
+    protected function resolveUserIdsMatchingTags(array $tags): array
+    {
+        $normalizedTags = collect($tags)
+            ->map(fn ($tag) => strtolower(trim((string) $tag)))
+            ->filter()
+            ->unique()
+            ->all();
+
+        if (empty($normalizedTags)) {
+            return [];
+        }
+
+        $matchedIds = [];
+        foreach (User::query()->select(['id', 'email', 'nama'])->get() as $candidate) {
+            foreach ($this->userIdentifiers($candidate) as $identifier) {
+                if (in_array($identifier, $normalizedTags, true)) {
+                    $matchedIds[] = (string) $candidate->id;
+                    break;
+                }
+            }
+        }
+
+        return array_values(array_unique($matchedIds));
     }
 
     /**
@@ -229,7 +291,7 @@ class ChatController extends Controller
         }
 
         $userIdentifiers = $this->userIdentifiers($user);
-        foreach ($topic->id_anggota_ditandai ?? [] as $tag) {
+        foreach ($this->extractTaggedList($topic) as $tag) {
             if (in_array(strtolower(trim((string) $tag)), $userIdentifiers, true)) {
                 return true;
             }
@@ -247,7 +309,7 @@ class ChatController extends Controller
             ->unique()
             ->all();
 
-        $normalizedTags = collect($topic->id_anggota_ditandai ?? [])
+        $normalizedTags = collect($this->extractTaggedList($topic))
             ->map(fn ($tag) => strtolower(trim((string) $tag)))
             ->filter()
             ->unique()
