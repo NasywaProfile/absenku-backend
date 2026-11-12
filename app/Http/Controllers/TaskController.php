@@ -150,13 +150,12 @@ class TaskController extends Controller
             ], 422);
         }
 
+        [$validAvatar, $normalizedAvatar] = $this->normalizeAssigneeAvatar($petugasFoto);
         $lampiran = $request->input('lampiran', $request->input('attachments', []));
         if (! is_array($lampiran)) {
             $lampiran = [];
         }
-        if (\App\Support\InputSanitizer::findUnsafeMediaUrl($lampiran) !== null
-            || (is_string($petugasFoto) && ! \App\Support\InputSanitizer::isSafeMediaUrl($petugasFoto))
-        ) {
+        if (\App\Support\InputSanitizer::findUnsafeMediaUrl($lampiran) !== null || ! $validAvatar) {
             return response()->json([
                 'message' => 'Lampiran tugas mengandung skema URL atau tipe berkas yang tidak diizinkan.',
             ], 422);
@@ -180,7 +179,7 @@ class TaskController extends Controller
                 'prioritas' => $prioritas,
                 'ditugaskan_ke' => $ditugaskan,
                 'nama_petugas' => $petugasNama,
-                'foto_petugas' => is_string($petugasFoto) ? $petugasFoto : null,
+                'foto_petugas' => $normalizedAvatar,
                 'daftar_anggota' => $anggota,
                 'dibuat_oleh' => $existingTask && $existingTask->dibuat_oleh
                     ? $existingTask->dibuat_oleh
@@ -270,13 +269,15 @@ class TaskController extends Controller
                 $data['nama_petugas'] = $rawName !== null ? $this->truncateStr((string) $rawName, 255) : null;
             }
             if ($request->has('foto_petugas') || $request->has('assigned_avatar')) {
-                $fotoUpdate = $request->input('foto_petugas', $request->input('assigned_avatar'));
-                if (is_string($fotoUpdate) && ! \App\Support\InputSanitizer::isSafeMediaUrl($fotoUpdate)) {
+                [$validAvatar, $normalizedAvatar] = $this->normalizeAssigneeAvatar(
+                    $request->input('foto_petugas', $request->input('assigned_avatar'))
+                );
+                if (! $validAvatar) {
                     return response()->json([
                         'message' => 'URL foto petugas tidak valid atau tidak diizinkan.',
                     ], 422);
                 }
-                $data['foto_petugas'] = is_string($fotoUpdate) ? $fotoUpdate : null;
+                $data['foto_petugas'] = $normalizedAvatar;
             }
             if ($request->has('daftar_anggota') || $request->has('assignees')) {
                 $anggotaUpdate = $request->input('daftar_anggota', $request->input('assignees'));
@@ -321,5 +322,29 @@ class TaskController extends Controller
         return response()->json([
             'message' => 'Tugas proyek berhasil dihapus.',
         ], 200);
+    }
+
+    /**
+     * Validate assignee avatar URL/data-URI and bound it to MySQL TEXT capacity (65,535 bytes).
+     *
+     * @return array{0: bool, 1: ?string}
+     */
+    private function normalizeAssigneeAvatar(mixed $raw): array
+    {
+        if (! is_string($raw)) {
+            return [true, null];
+        }
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return [true, null];
+        }
+        if (! \App\Support\InputSanitizer::isSafeMediaUrl($trimmed)) {
+            return [false, null];
+        }
+        if (strlen($trimmed) > 65000) {
+            return [true, null];
+        }
+
+        return [true, $trimmed];
     }
 }
