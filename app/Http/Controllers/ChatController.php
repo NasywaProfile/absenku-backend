@@ -67,7 +67,7 @@ class ChatController extends Controller
                 'catatan_lengkap' => $catatanLengkap,
                 'dibuat_oleh_id' => $existingTopic ? $existingTopic->dibuat_oleh_id : $user->id,
                 'dibuat_oleh_nama' => $existingTopic ? $existingTopic->dibuat_oleh_nama : $user->nama,
-                'dibuat_oleh_foto' => $existingTopic ? $existingTopic->dibuat_oleh_foto : ($user->foto_profil ?? ''),
+                'dibuat_oleh_foto' => $existingTopic ? $existingTopic->dibuat_oleh_foto : (InputSanitizer::boundTextMediaUrl($user->foto_profil)[1] ?? ''),
             ]
         );
 
@@ -229,7 +229,7 @@ class ChatController extends Controller
                     'topik_id' => $topikId,
                     'pengguna_id' => $existingMsg ? $existingMsg->pengguna_id : $penggunaId,
                     'nama_pengirim' => $existingMsg ? $existingMsg->nama_pengirim : $user->nama,
-                    'foto_pengirim' => $existingMsg ? $existingMsg->foto_pengirim : $user->foto_profil,
+                    'foto_pengirim' => $existingMsg ? $existingMsg->foto_pengirim : InputSanitizer::boundTextMediaUrl($user->foto_profil)[1],
                     'peran_pengirim' => $existingMsg ? $existingMsg->peran_pengirim : $user->peran,
                     'tipe_kepegawaian' => $existingMsg ? $existingMsg->tipe_kepegawaian : ($user->tipe_kepegawaian ?: 'CONTRACT'),
                     'isi_pesan' => $isi,

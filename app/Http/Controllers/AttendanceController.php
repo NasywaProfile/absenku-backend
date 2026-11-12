@@ -6,6 +6,7 @@ use App\Models\AttendanceRecord;
 use App\Models\LeaveRequest;
 use App\Models\OfficeConfig;
 use App\Models\User;
+use App\Support\InputSanitizer;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -193,7 +194,7 @@ class AttendanceController extends Controller
             'pengguna_id' => $targetUser->id,
             'tanggal' => $today,
             'nama_karyawan' => $targetUser->nama,
-            'foto_karyawan' => $targetUser->foto_profil ?? '',
+            'foto_karyawan' => InputSanitizer::boundTextMediaUrl($targetUser->foto_profil)[1] ?? '',
             'divisi' => $targetUser->divisi ?: 'Operasional',
             'tipe_kepegawaian' => $targetUser->tipe_kepegawaian ?: 'CONTRACT',
             'jam_masuk' => $jamMasuk,
@@ -269,7 +270,7 @@ class AttendanceController extends Controller
             [
                 'id' => $recordId,
                 'nama_karyawan' => $targetUser->nama,
-                'foto_karyawan' => $targetUser->foto_profil ?? '',
+                'foto_karyawan' => InputSanitizer::boundTextMediaUrl($targetUser->foto_profil)[1] ?? '',
                 'divisi' => $targetUser->divisi ?: 'Operasional',
                 'tipe_kepegawaian' => $targetUser->tipe_kepegawaian ?: 'CONTRACT',
                 'jam_masuk' => $jamMasuk,

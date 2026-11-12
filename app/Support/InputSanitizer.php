@@ -131,6 +131,42 @@ class InputSanitizer
     }
 
     /**
+     * Pangkas panjang string sesuai kapasitas kolom database.
+     */
+    public static function truncateStr(?string $value, int $maxLen): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return mb_substr(trim($value), 0, $maxLen);
+    }
+
+    /**
+     * Validasi URL media/avatar serta batasi panjangnya agar muat pada kolom TEXT MySQL (~65 KB).
+     *
+     * @return array{0: bool, 1: ?string}
+     */
+    public static function boundTextMediaUrl(mixed $raw, int $maxBytes = 65000): array
+    {
+        if (! is_string($raw)) {
+            return [true, null];
+        }
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return [true, null];
+        }
+        if (! self::isSafeMediaUrl($trimmed)) {
+            return [false, null];
+        }
+        if (strlen($trimmed) > $maxBytes) {
+            return [true, null];
+        }
+
+        return [true, $trimmed];
+    }
+
+    /**
      * Menghapus blok skrip/event-handler berbahaya pada konten HTML email bila berasal dari klien.
      */
     public static function sanitizeEmailHtml(string $html): string

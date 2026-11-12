@@ -61,15 +61,19 @@ class LeaveController extends Controller
             return response()->json(['message' => 'Alasan pengajuan izin wajib diisi.'], 422);
         }
 
-        $namaLampiran = $request->input('nama_lampiran', $request->input('attachment_name'));
+        $namaLampiranRaw = $request->input('nama_lampiran', $request->input('attachment_name'));
         $dataLampiran = $request->input('data_lampiran', $request->input('attachment_data'));
-        $tipeLampiran = $request->input('tipe_lampiran', $request->input('attachment_type'));
+        $tipeLampiranRaw = $request->input('tipe_lampiran', $request->input('attachment_type'));
 
         if (is_string($dataLampiran) && ! InputSanitizer::isSafeMediaUrl($dataLampiran)) {
             return response()->json([
                 'message' => 'Format lampiran tidak valid atau menggunakan tipe konten yang dilarang.',
             ], 422);
         }
+
+        $namaLampiran = InputSanitizer::truncateStr(is_string($namaLampiranRaw) ? $namaLampiranRaw : null, 255);
+        $tipeLampiran = InputSanitizer::truncateStr(is_string($tipeLampiranRaw) ? $tipeLampiranRaw : null, 50);
+        [, $boundedFotoKaryawan] = InputSanitizer::boundTextMediaUrl($user->foto_profil);
 
         // Cek dan cegah duplikasi perizinan yang sama persis
         $existing = LeaveRequest::where('pengguna_id', $user->id)
@@ -93,8 +97,8 @@ class LeaveController extends Controller
         $leave = LeaveRequest::create([
             'id' => $leaveId,
             'pengguna_id' => $user->id,
-            'nama_karyawan' => $user->nama,
-            'foto_karyawan' => $user->foto_profil,
+            'nama_karyawan' => InputSanitizer::truncateStr($user->nama, 255) ?? $user->nama,
+            'foto_karyawan' => $boundedFotoKaryawan,
             'divisi' => $user->divisi,
             'kategori_izin' => $kategori,
             'tanggal_mulai' => $tglMulai,

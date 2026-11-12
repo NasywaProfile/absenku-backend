@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\DailyTaskLog;
 use App\Models\KanbanTask;
+use App\Support\InputSanitizer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
@@ -92,15 +93,6 @@ class TaskController extends Controller
     /**
      * Menjaga batas panjang kolom string VARCHAR MySQL agar tidak memicu SQLSTATE[22001].
      */
-    private function truncateStr(?string $value, int $maxLen): ?string
-    {
-        if ($value === null) {
-            return null;
-        }
-
-        return mb_substr(trim($value), 0, $maxLen);
-    }
-
     // ================= Tugas Proyek (Kanban) =================
     public function getKanbanTasks(Request $request)
     {
@@ -132,9 +124,9 @@ class TaskController extends Controller
             $prioritas = 'MEDIUM';
         }
         $ditugaskanRaw = $request->input('ditugaskan_ke', $request->input('assigned_to'));
-        $ditugaskan = $ditugaskanRaw !== null ? $this->truncateStr((string) $ditugaskanRaw, 50) : null;
+        $ditugaskan = $ditugaskanRaw !== null ? InputSanitizer::truncateStr((string) $ditugaskanRaw, 50) : null;
         $petugasNamaRaw = $request->input('nama_petugas', $request->input('assigned_name'));
-        $petugasNama = $petugasNamaRaw !== null ? $this->truncateStr((string) $petugasNamaRaw, 255) : null;
+        $petugasNama = $petugasNamaRaw !== null ? InputSanitizer::truncateStr((string) $petugasNamaRaw, 255) : null;
         $petugasFoto = $request->input('foto_petugas', $request->input('assigned_avatar'));
         $anggota = $request->input('daftar_anggota', $request->input('assignees', []));
         if (! is_array($anggota)) {
@@ -150,7 +142,7 @@ class TaskController extends Controller
             ], 422);
         }
 
-        [$validAvatar, $normalizedAvatar] = $this->normalizeAssigneeAvatar($petugasFoto);
+        [$validAvatar, $normalizedAvatar] = InputSanitizer::boundTextMediaUrl($petugasFoto);
         $lampiran = $request->input('lampiran', $request->input('attachments', []));
         if (! is_array($lampiran)) {
             $lampiran = [];
@@ -173,7 +165,7 @@ class TaskController extends Controller
         $task = KanbanTask::updateOrCreate(
             ['id' => $taskId],
             [
-                'judul_tugas' => $this->truncateStr($judul, 255) ?? $judul,
+                'judul_tugas' => InputSanitizer::truncateStr($judul, 255) ?? $judul,
                 'deskripsi' => $deskripsi,
                 'status_tugas' => $status,
                 'prioritas' => $prioritas,
@@ -183,7 +175,7 @@ class TaskController extends Controller
                 'daftar_anggota' => $anggota,
                 'dibuat_oleh' => $existingTask && $existingTask->dibuat_oleh
                     ? $existingTask->dibuat_oleh
-                    : $this->truncateStr((string) $user->id, 100),
+                    : InputSanitizer::truncateStr((string) $user->id, 100),
                 'tenggat_waktu' => $tenggat,
                 'lampiran' => $lampiran,
             ]
@@ -252,7 +244,7 @@ class TaskController extends Controller
                 if ($judulUpdate === '') {
                     return response()->json(['message' => 'Judul tugas tidak boleh kosong.'], 422);
                 }
-                $data['judul_tugas'] = $this->truncateStr($judulUpdate, 255);
+                $data['judul_tugas'] = InputSanitizer::truncateStr($judulUpdate, 255);
             }
             if ($request->has('prioritas') || $request->has('priority')) {
                 $reqPrio = strtoupper((string) $request->input('prioritas', $request->input('priority')));
@@ -262,14 +254,14 @@ class TaskController extends Controller
             }
             if ($request->has('ditugaskan_ke') || $request->has('assigned_to')) {
                 $rawAssignee = $request->input('ditugaskan_ke', $request->input('assigned_to'));
-                $data['ditugaskan_ke'] = $rawAssignee !== null ? $this->truncateStr((string) $rawAssignee, 50) : null;
+                $data['ditugaskan_ke'] = $rawAssignee !== null ? InputSanitizer::truncateStr((string) $rawAssignee, 50) : null;
             }
             if ($request->has('nama_petugas') || $request->has('assigned_name')) {
                 $rawName = $request->input('nama_petugas', $request->input('assigned_name'));
-                $data['nama_petugas'] = $rawName !== null ? $this->truncateStr((string) $rawName, 255) : null;
+                $data['nama_petugas'] = $rawName !== null ? InputSanitizer::truncateStr((string) $rawName, 255) : null;
             }
             if ($request->has('foto_petugas') || $request->has('assigned_avatar')) {
-                [$validAvatar, $normalizedAvatar] = $this->normalizeAssigneeAvatar(
+                [$validAvatar, $normalizedAvatar] = InputSanitizer::boundTextMediaUrl(
                     $request->input('foto_petugas', $request->input('assigned_avatar'))
                 );
                 if (! $validAvatar) {
@@ -322,29 +314,5 @@ class TaskController extends Controller
         return response()->json([
             'message' => 'Tugas proyek berhasil dihapus.',
         ], 200);
-    }
-
-    /**
-     * Validate assignee avatar URL/data-URI and bound it to MySQL TEXT capacity (65,535 bytes).
-     *
-     * @return array{0: bool, 1: ?string}
-     */
-    private function normalizeAssigneeAvatar(mixed $raw): array
-    {
-        if (! is_string($raw)) {
-            return [true, null];
-        }
-        $trimmed = trim($raw);
-        if ($trimmed === '') {
-            return [true, null];
-        }
-        if (! \App\Support\InputSanitizer::isSafeMediaUrl($trimmed)) {
-            return [false, null];
-        }
-        if (strlen($trimmed) > 65000) {
-            return [true, null];
-        }
-
-        return [true, $trimmed];
     }
 }

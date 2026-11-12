@@ -229,6 +229,11 @@ class AuthController extends Controller
                 'message' => 'Format foto profil tidak valid atau menggunakan skema URL yang dilarang.',
             ], 422);
         }
+        if (is_string($foto) && strlen(trim($foto)) > 65000) {
+            return response()->json([
+                'message' => 'Ukuran foto profil terlalu besar untuk disimpan langsung. Unggah gambar melalui media upload atau gunakan gambar lebih kecil.',
+            ], 422);
+        }
         $telepon = $request->input('nomor_telepon', $request->input('phone', $user->nomor_telepon));
         $divisi = $request->input('divisi', $request->input('department', $user->divisi));
         $jabatan = $request->input('jabatan', $request->input('position', $user->jabatan));
