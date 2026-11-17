@@ -37,7 +37,7 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class])->group(function (
 
     // Konfigurasi Kantor & Geofence (read untuk radar karyawan, write khusus SUPER_ADMIN)
     Route::get('/office-config', [OfficeConfigController::class, 'show']);
-    Route::put('/office-config', [OfficeConfigController::class, 'update'])->middleware('role:SUPER_ADMIN');
+    Route::match(['put', 'post'], '/office-config', [OfficeConfigController::class, 'update'])->middleware('role:SUPER_ADMIN');
 
     // Data Pengguna (field sensitif & pending accounts disaring untuk non-admin di controller)
     Route::get('/users', [AuthController::class, 'getUsers']);

@@ -46,14 +46,14 @@ class OfficeConfigController extends Controller
             'longitude' => 'nullable|numeric|between:-180,180',
             'radius_geofence_meter' => 'nullable|integer|min:10|max:50000',
             'geofence_radius_meter' => 'nullable|integer|min:10|max:50000',
-            'jam_masuk' => 'nullable|date_format:H:i',
-            'work_start_hour' => 'nullable|date_format:H:i',
-            'jam_pulang' => 'nullable|date_format:H:i',
-            'work_end_hour' => 'nullable|date_format:H:i',
+            'jam_masuk' => 'nullable',
+            'work_start_hour' => 'nullable',
+            'jam_pulang' => 'nullable',
+            'work_end_hour' => 'nullable',
             'toleransi_keterlambatan_menit' => 'nullable|integer|min:0|max:240',
             'grace_period_minutes' => 'nullable|integer|min:0|max:240',
-            'status_geofence_aktif' => 'nullable|boolean',
-            'is_geofence_active' => 'nullable|boolean',
+            'status_geofence_aktif' => 'nullable',
+            'is_geofence_active' => 'nullable',
         ]);
 
         $config = OfficeConfig::first();
@@ -63,31 +63,52 @@ class OfficeConfigController extends Controller
 
         $data = [];
         if (array_key_exists('nama_kantor', $validated) || array_key_exists('name', $validated)) {
-            $data['nama_kantor'] = $validated['nama_kantor'] ?? $validated['name'];
+            $val = $validated['nama_kantor'] ?? $validated['name'];
+            if ($val !== null) {
+                $data['nama_kantor'] = (string) $val;
+            }
         }
         if (array_key_exists('alamat_kantor', $validated) || array_key_exists('address', $validated)) {
-            $data['alamat_kantor'] = $validated['alamat_kantor'] ?? $validated['address'];
+            $val = $validated['alamat_kantor'] ?? $validated['address'];
+            if ($val !== null) {
+                $data['alamat_kantor'] = (string) $val;
+            }
         }
         if (array_key_exists('latitude', $validated) && $validated['latitude'] !== null) {
-            $data['latitude'] = $validated['latitude'];
+            $data['latitude'] = (float) $validated['latitude'];
         }
         if (array_key_exists('longitude', $validated) && $validated['longitude'] !== null) {
-            $data['longitude'] = $validated['longitude'];
+            $data['longitude'] = (float) $validated['longitude'];
         }
         if (array_key_exists('radius_geofence_meter', $validated) || array_key_exists('geofence_radius_meter', $validated)) {
-            $data['radius_geofence_meter'] = $validated['radius_geofence_meter'] ?? $validated['geofence_radius_meter'];
+            $val = $validated['radius_geofence_meter'] ?? $validated['geofence_radius_meter'];
+            if ($val !== null) {
+                $data['radius_geofence_meter'] = (int) $val;
+            }
         }
         if (array_key_exists('jam_masuk', $validated) || array_key_exists('work_start_hour', $validated)) {
-            $data['jam_masuk'] = $validated['jam_masuk'] ?? $validated['work_start_hour'];
+            $val = $validated['jam_masuk'] ?? $validated['work_start_hour'];
+            if ($val !== null && trim((string) $val) !== '') {
+                $parts = explode(':', trim((string) $val));
+                $data['jam_masuk'] = count($parts) >= 2 ? sprintf('%02d:%02d', (int) $parts[0], (int) $parts[1]) : trim((string) $val);
+            }
         }
         if (array_key_exists('jam_pulang', $validated) || array_key_exists('work_end_hour', $validated)) {
-            $data['jam_pulang'] = $validated['jam_pulang'] ?? $validated['work_end_hour'];
+            $val = $validated['jam_pulang'] ?? $validated['work_end_hour'];
+            if ($val !== null && trim((string) $val) !== '') {
+                $parts = explode(':', trim((string) $val));
+                $data['jam_pulang'] = count($parts) >= 2 ? sprintf('%02d:%02d', (int) $parts[0], (int) $parts[1]) : trim((string) $val);
+            }
         }
         if (array_key_exists('toleransi_keterlambatan_menit', $validated) || array_key_exists('grace_period_minutes', $validated)) {
-            $data['toleransi_keterlambatan_menit'] = $validated['toleransi_keterlambatan_menit'] ?? $validated['grace_period_minutes'];
+            $val = $validated['toleransi_keterlambatan_menit'] ?? $validated['grace_period_minutes'];
+            if ($val !== null) {
+                $data['toleransi_keterlambatan_menit'] = (int) $val;
+            }
         }
         if (array_key_exists('status_geofence_aktif', $validated) || array_key_exists('is_geofence_active', $validated)) {
-            $data['status_geofence_aktif'] = (bool) ($validated['status_geofence_aktif'] ?? $validated['is_geofence_active']);
+            $val = $validated['status_geofence_aktif'] ?? $validated['is_geofence_active'];
+            $data['status_geofence_aktif'] = filter_var($val, FILTER_VALIDATE_BOOLEAN);
         }
 
         $config->fill($data);
