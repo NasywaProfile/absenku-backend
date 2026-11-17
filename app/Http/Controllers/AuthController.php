@@ -111,13 +111,19 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $validated = $request->validate([
-            'email' => 'required|email',
+            'email' => 'required|string',
             'password' => 'required|string',
         ]);
 
-        $user = User::whereRaw('LOWER(email) = ?', [strtolower(trim($validated['email']))])->first();
+        $identifier = strtolower(trim((string) $validated['email']));
+        $user = User::whereRaw('LOWER(email) = ?', [$identifier])
+            ->orWhere('id', trim((string) $validated['email']))
+            ->first();
 
-        if (! $user || ! Hash::check($validated['password'], $user->password)) {
+        $rawPassword = (string) $validated['password'];
+        $cleanPassword = trim($rawPassword);
+
+        if (! $user || (! Hash::check($rawPassword, $user->password) && ! Hash::check($cleanPassword, $user->password))) {
             return response()->json([
                 'message' => 'Email/username atau password tidak sesuai.',
             ], 401);
@@ -370,17 +376,28 @@ class AuthController extends Controller
             ], 404);
         }
 
-        // Verifikasi kesesuaian nama lengkap (case-insensitive & trimmed)
-        $dbName = trim(strtolower((string) $user->nama));
-        if ($dbName !== strtolower($inputName)) {
+        // Verifikasi kesesuaian nama lengkap (case-insensitive, trimmed, toleran spasi berlebih)
+        $cleanInputName = preg_replace('/\s+/', ' ', strtolower($inputName));
+        $cleanDbName = preg_replace('/\s+/', ' ', strtolower(trim((string) ($user->nama ?: $user->name ?: ''))));
+
+        if ($cleanDbName !== $cleanInputName) {
             return response()->json([
                 'message' => 'Email atau nama lengkap tidak cocok dengan data akun terdaftar.',
             ], 404);
         }
 
         // Perbarui kata sandi dengan hash baru
-        $user->password = Hash::make($validated['password']);
+        $cleanPassword = trim((string) $validated['password']);
+        $newHash = Hash::make($cleanPassword);
+
+        $user->password = $newHash;
         $user->save();
+
+        // Pastikan ter-update langsung ke tabel MySQL pengguna
+        DB::table('pengguna')->where('id', $user->id)->update([
+            'password' => $newHash,
+            'updated_at' => now(),
+        ]);
 
         // Cabut seluruh token sesi aktif pengguna agar aman
         $user->tokens()->delete();
@@ -399,7 +416,7 @@ class AuthController extends Controller
         $actor = $request->user();
         $actorRole = strtoupper((string) ($actor->peran ?? ''));
 
-        $targetUser = User::find($id);
+        $targetUser = $this->findTargetUser((string) $id, $request->input('email'));
         if (! $targetUser) {
             return response()->json(['message' => 'Pengguna tidak ditemukan.'], 404);
         }
@@ -411,8 +428,17 @@ class AuthController extends Controller
             return response()->json(['message' => 'Hanya Super Admin yang berhak mereset kata sandi akun Admin / Super Admin.'], 403);
         }
 
-        $targetUser->password = Hash::make($validated['password']);
+        $cleanPassword = trim((string) $validated['password']);
+        $newHash = Hash::make($cleanPassword);
+
+        $targetUser->password = $newHash;
         $targetUser->save();
+
+        // Pastikan ter-update langsung ke tabel MySQL pengguna
+        DB::table('pengguna')->where('id', $targetUser->id)->update([
+            'password' => $newHash,
+            'updated_at' => now(),
+        ]);
 
         // Cabut seluruh token lama pengguna target
         $targetUser->tokens()->delete();

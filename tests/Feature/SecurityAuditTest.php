@@ -731,6 +731,13 @@ class SecurityAuditTest extends TestCase
             'password' => 'PasswordDariAdmin456',
         ])->assertStatus(200);
 
+        // Login dengan password baru hasil reset admin wajib sukses
+        $adminResetLogin = $this->postJson('/api/login', [
+            'email' => $this->employee->email,
+            'password' => 'PasswordDariAdmin456',
+        ])->assertStatus(200);
+        $this->assertNotEmpty($adminResetLogin->json('token'));
+
         // 4. Admin biasa dilarang mereset password Super Admin
         $this->postJson("/api/users/{$this->superAdmin->id}/reset-password", [
             'password' => 'HackerSuperAdmin123',
