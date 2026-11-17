@@ -22,7 +22,7 @@ Route::get('/login', function () {
 Route::get('/office-config', [OfficeConfigController::class, 'show'])->middleware('throttle:60,1');
 
 // Reset Password Mandiri Publik (Memerlukan verifikasi Email + Nama Lengkap terdaftar)
-Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:30,1');
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:60,1');
 
 // Authenticated Routes (diizinkan juga untuk akun PENDING_APPROVAL saat onboarding & cek status)
 Route::middleware('auth:sanctum')->group(function () {
