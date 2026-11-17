@@ -40,20 +40,25 @@ class OfficeConfigController extends Controller
         $validated = $request->validate([
             'nama_kantor' => 'nullable|string|max:255',
             'name' => 'nullable|string|max:255',
-            'alamat_kantor' => 'nullable|string|max:500',
-            'address' => 'nullable|string|max:500',
+            'alamat_kantor' => 'nullable|string|max:2000',
+            'address' => 'nullable|string|max:2000',
             'latitude' => 'nullable|numeric|between:-90,90',
             'longitude' => 'nullable|numeric|between:-180,180',
             'radius_geofence_meter' => 'nullable|integer|min:10|max:50000',
             'geofence_radius_meter' => 'nullable|integer|min:10|max:50000',
+            'geofenceRadiusMeter' => 'nullable|integer|min:10|max:50000',
             'jam_masuk' => 'nullable',
             'work_start_hour' => 'nullable',
+            'workStartHour' => 'nullable',
             'jam_pulang' => 'nullable',
             'work_end_hour' => 'nullable',
+            'workEndHour' => 'nullable',
             'toleransi_keterlambatan_menit' => 'nullable|integer|min:0|max:240',
             'grace_period_minutes' => 'nullable|integer|min:0|max:240',
+            'gracePeriodMinutes' => 'nullable|integer|min:0|max:240',
             'status_geofence_aktif' => 'nullable',
             'is_geofence_active' => 'nullable',
+            'isGeofenceActive' => 'nullable',
         ]);
 
         $config = OfficeConfig::first();
@@ -65,13 +70,13 @@ class OfficeConfigController extends Controller
         if (array_key_exists('nama_kantor', $validated) || array_key_exists('name', $validated)) {
             $val = $validated['nama_kantor'] ?? $validated['name'];
             if ($val !== null) {
-                $data['nama_kantor'] = (string) $val;
+                $data['nama_kantor'] = trim((string) $val);
             }
         }
         if (array_key_exists('alamat_kantor', $validated) || array_key_exists('address', $validated)) {
             $val = $validated['alamat_kantor'] ?? $validated['address'];
             if ($val !== null) {
-                $data['alamat_kantor'] = (string) $val;
+                $data['alamat_kantor'] = trim((string) $val);
             }
         }
         if (array_key_exists('latitude', $validated) && $validated['latitude'] !== null) {
@@ -80,35 +85,37 @@ class OfficeConfigController extends Controller
         if (array_key_exists('longitude', $validated) && $validated['longitude'] !== null) {
             $data['longitude'] = (float) $validated['longitude'];
         }
-        if (array_key_exists('radius_geofence_meter', $validated) || array_key_exists('geofence_radius_meter', $validated)) {
-            $val = $validated['radius_geofence_meter'] ?? $validated['geofence_radius_meter'];
+        if (array_key_exists('radius_geofence_meter', $validated) || array_key_exists('geofence_radius_meter', $validated) || array_key_exists('geofenceRadiusMeter', $validated)) {
+            $val = $validated['radius_geofence_meter'] ?? $validated['geofence_radius_meter'] ?? $validated['geofenceRadiusMeter'];
             if ($val !== null) {
                 $data['radius_geofence_meter'] = (int) $val;
             }
         }
-        if (array_key_exists('jam_masuk', $validated) || array_key_exists('work_start_hour', $validated)) {
-            $val = $validated['jam_masuk'] ?? $validated['work_start_hour'];
+        if (array_key_exists('jam_masuk', $validated) || array_key_exists('work_start_hour', $validated) || array_key_exists('workStartHour', $validated)) {
+            $val = $validated['jam_masuk'] ?? $validated['work_start_hour'] ?? $validated['workStartHour'];
             if ($val !== null && trim((string) $val) !== '') {
                 $parts = explode(':', trim((string) $val));
                 $data['jam_masuk'] = count($parts) >= 2 ? sprintf('%02d:%02d', (int) $parts[0], (int) $parts[1]) : trim((string) $val);
             }
         }
-        if (array_key_exists('jam_pulang', $validated) || array_key_exists('work_end_hour', $validated)) {
-            $val = $validated['jam_pulang'] ?? $validated['work_end_hour'];
+        if (array_key_exists('jam_pulang', $validated) || array_key_exists('work_end_hour', $validated) || array_key_exists('workEndHour', $validated)) {
+            $val = $validated['jam_pulang'] ?? $validated['work_end_hour'] ?? $validated['workEndHour'];
             if ($val !== null && trim((string) $val) !== '') {
                 $parts = explode(':', trim((string) $val));
                 $data['jam_pulang'] = count($parts) >= 2 ? sprintf('%02d:%02d', (int) $parts[0], (int) $parts[1]) : trim((string) $val);
             }
         }
-        if (array_key_exists('toleransi_keterlambatan_menit', $validated) || array_key_exists('grace_period_minutes', $validated)) {
-            $val = $validated['toleransi_keterlambatan_menit'] ?? $validated['grace_period_minutes'];
+        if (array_key_exists('toleransi_keterlambatan_menit', $validated) || array_key_exists('grace_period_minutes', $validated) || array_key_exists('gracePeriodMinutes', $validated)) {
+            $val = $validated['toleransi_keterlambatan_menit'] ?? $validated['grace_period_minutes'] ?? $validated['gracePeriodMinutes'];
             if ($val !== null) {
                 $data['toleransi_keterlambatan_menit'] = (int) $val;
             }
         }
-        if (array_key_exists('status_geofence_aktif', $validated) || array_key_exists('is_geofence_active', $validated)) {
-            $val = $validated['status_geofence_aktif'] ?? $validated['is_geofence_active'];
-            $data['status_geofence_aktif'] = filter_var($val, FILTER_VALIDATE_BOOLEAN);
+        if (array_key_exists('status_geofence_aktif', $validated) || array_key_exists('is_geofence_active', $validated) || array_key_exists('isGeofenceActive', $validated)) {
+            $val = $validated['status_geofence_aktif'] ?? $validated['is_geofence_active'] ?? $validated['isGeofenceActive'];
+            if ($val !== null) {
+                $data['status_geofence_aktif'] = filter_var($val, FILTER_VALIDATE_BOOLEAN);
+            }
         }
 
         $config->fill($data);

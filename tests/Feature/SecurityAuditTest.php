@@ -440,10 +440,13 @@ class SecurityAuditTest extends TestCase
             'isi_pesan' => 'Pesan Dibajak',
         ])->assertStatus(403);
 
-        // Pastikan security response headers aktif
+        // Pastikan security response headers aktif & endpoint GET /api/office-config bersifat publik tanpa token agar browser baru langsung sinkron
         $headerRes = $this->getJson('/api/office-config')->assertStatus(200);
         $headerRes->assertHeader('X-Content-Type-Options', 'nosniff');
         $headerRes->assertHeader('X-Frame-Options', 'SAMEORIGIN');
+
+        $unauthRes = $this->withHeaders([])->getJson('/api/office-config')->assertStatus(200);
+        $this->assertNotEmpty($unauthRes->json('nama_kantor'));
     }
 
     public function test_no_hardcoded_default_passwords_in_seeder_and_superadmin_rotation_plus_backup_work(): void

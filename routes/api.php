@@ -18,6 +18,9 @@ Route::get('/login', function () {
     return response()->json(['message' => 'Unauthenticated.'], 401);
 })->name('login');
 
+// Konfigurasi Kantor & Geofence Publik (dapat dibaca klien sebelum & sesudah login untuk radar presensi & profil kantor)
+Route::get('/office-config', [OfficeConfigController::class, 'show'])->middleware('throttle:60,1');
+
 // Authenticated Routes (diizinkan juga untuk akun PENDING_APPROVAL saat onboarding & cek status)
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
@@ -35,8 +38,7 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class])->group(function (
     // Pengiriman Email Notifikasi (terautentikasi, rate-limited, & anti open-relay)
     Route::post('/send-email', [EmailController::class, 'sendEmail'])->middleware('throttle:20,1');
 
-    // Konfigurasi Kantor & Geofence (read untuk radar karyawan, write khusus SUPER_ADMIN)
-    Route::get('/office-config', [OfficeConfigController::class, 'show']);
+    // Konfigurasi Kantor & Geofence (write khusus SUPER_ADMIN)
     Route::match(['put', 'post'], '/office-config', [OfficeConfigController::class, 'update'])->middleware('role:SUPER_ADMIN');
 
     // Data Pengguna (field sensitif & pending accounts disaring untuk non-admin di controller)
