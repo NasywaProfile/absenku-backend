@@ -12,8 +12,8 @@ use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Support\Facades\Route;
 
 // Public Authentication Routes (dilengkapi rate-limiting anti brute-force)
-Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:10,1');
-Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:15,1');
+Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:30,1');
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:60,1');
 Route::get('/login', function () {
     return response()->json(['message' => 'Unauthenticated.'], 401);
 })->name('login');
