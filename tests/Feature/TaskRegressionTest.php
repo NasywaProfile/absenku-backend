@@ -75,4 +75,110 @@ class TaskRegressionTest extends TestCase
         ]);
         $unsafeUpdateRes->assertStatus(422);
     }
+
+    public function test_kanban_task_syncs_review_notes_submission_notes_and_activities(): void
+    {
+        $pic = $this->makeActiveUser('usr_pic_rev', 'ADMIN');
+        $employee = $this->makeActiveUser('usr_emp_rev', 'EMPLOYEE');
+
+        Sanctum::actingAs($pic);
+        $res = $this->postJson('/api/kanban-tasks', [
+            'id' => 'task_rev_sync_01',
+            'title' => 'Tugas dengan Chat & Revisi',
+            'description' => 'Kerjakan modul ini',
+            'status' => 'IN_PROGRESS',
+            'priority' => 'HIGH',
+            'assigned_to' => $employee->id,
+            'assigned_name' => $employee->nama,
+            'activities' => [
+                [
+                    'id' => 'act_01',
+                    'type' => 'COMMENT_ADDED',
+                    'userId' => $pic->id,
+                    'userName' => $pic->nama,
+                    'notes' => 'Harap selesaikan sebelum sore',
+                    'timestamp' => '2026-11-17 14:00',
+                ],
+            ],
+        ]);
+        $res->assertCreated();
+        $this->assertCount(1, $res->json('task.activities'));
+        $this->assertSame('Harap selesaikan sebelum sore', $res->json('task.activities.0.notes'));
+
+        // Karyawan menyerahkan hasil preview dengan catatan
+        Sanctum::actingAs($employee);
+        $subRes = $this->putJson('/api/kanban-tasks/task_rev_sync_01', [
+            'status' => 'DONE',
+            'submission_notes' => 'Berikut hasil desain sudah siap dicek',
+            'activities' => [
+                [
+                    'id' => 'act_01',
+                    'type' => 'COMMENT_ADDED',
+                    'userId' => $pic->id,
+                    'userName' => $pic->nama,
+                    'notes' => 'Harap selesaikan sebelum sore',
+                    'timestamp' => '2026-11-17 14:00',
+                ],
+                [
+                    'id' => 'act_02',
+                    'type' => 'SUBMITTED',
+                    'userId' => $employee->id,
+                    'userName' => $employee->nama,
+                    'notes' => 'Berikut hasil desain sudah siap dicek',
+                    'timestamp' => '2026-11-17 15:00',
+                ],
+            ],
+        ]);
+        $subRes->assertOk();
+        $this->assertSame('DONE', $subRes->json('task.status'));
+        $this->assertSame('Berikut hasil desain sudah siap dicek', $subRes->json('task.submission_notes'));
+        $this->assertCount(2, $subRes->json('task.activities'));
+
+        // PIC meminta revisi dengan arahan perbaikan
+        Sanctum::actingAs($pic);
+        $revRes = $this->putJson('/api/kanban-tasks/task_rev_sync_01', [
+            'status' => 'IN_PROGRESS',
+            'review_notes' => 'Tolong font judul diganti Inter dan warna tombol diubah biru',
+            'activities' => [
+                [
+                    'id' => 'act_01',
+                    'type' => 'COMMENT_ADDED',
+                    'userId' => $pic->id,
+                    'userName' => $pic->nama,
+                    'notes' => 'Harap selesaikan sebelum sore',
+                    'timestamp' => '2026-11-17 14:00',
+                ],
+                [
+                    'id' => 'act_02',
+                    'type' => 'SUBMITTED',
+                    'userId' => $employee->id,
+                    'userName' => $employee->nama,
+                    'notes' => 'Berikut hasil desain sudah siap dicek',
+                    'timestamp' => '2026-11-17 15:00',
+                ],
+                [
+                    'id' => 'act_03',
+                    'type' => 'REVISION_REQUESTED',
+                    'userId' => $pic->id,
+                    'userName' => $pic->nama,
+                    'notes' => 'Tolong font judul diganti Inter dan warna tombol diubah biru',
+                    'timestamp' => '2026-11-17 15:30',
+                ],
+            ],
+        ]);
+        $revRes->assertOk();
+        $this->assertSame('IN_PROGRESS', $revRes->json('task.status'));
+        $this->assertSame('Tolong font judul diganti Inter dan warna tombol diubah biru', $revRes->json('task.review_notes'));
+        $this->assertCount(3, $revRes->json('task.activities'));
+
+        // GET /api/kanban-tasks memastikan semua field terserialisasi dengan lengkap
+        Sanctum::actingAs($employee);
+        $getRes = $this->getJson('/api/kanban-tasks');
+        $getRes->assertOk();
+        $fetched = collect($getRes->json())->firstWhere('id', 'task_rev_sync_01');
+        $this->assertNotNull($fetched);
+        $this->assertSame('Tolong font judul diganti Inter dan warna tombol diubah biru', $fetched['review_notes']);
+        $this->assertSame('Berikut hasil desain sudah siap dicek', $fetched['submission_notes']);
+        $this->assertCount(3, $fetched['activities']);
+    }
 }

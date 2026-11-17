@@ -26,6 +26,9 @@ class KanbanTask extends Model
         'dibuat_oleh',
         'tenggat_waktu',
         'lampiran',
+        'catatan_revisi',
+        'catatan_penyerahan',
+        'aktivitas',
     ];
 
     protected function casts(): array
@@ -33,6 +36,7 @@ class KanbanTask extends Model
         return [
             'daftar_anggota' => 'array',
             'lampiran' => 'array',
+            'aktivitas' => 'array',
         ];
     }
 
@@ -48,6 +52,9 @@ class KanbanTask extends Model
         'created_by',
         'due_date',
         'attachments',
+        'review_notes',
+        'submission_notes',
+        'activities',
     ];
 
     public function getTitleAttribute() { return $this->judul_tugas; }
@@ -60,5 +67,8 @@ class KanbanTask extends Model
     public function getAssigneesAttribute() { return $this->daftar_anggota; }
     public function getCreatedByAttribute() { return $this->dibuat_oleh; }
     public function getDueDateAttribute() { return $this->tenggat_waktu; }
-    public function getAttachmentsAttribute() { return $this->lampiran; }
+    public function getAttachmentsAttribute() { return $this->lampiran ?? []; }
+    public function getReviewNotesAttribute() { return $this->catatan_revisi; }
+    public function getSubmissionNotesAttribute() { return $this->catatan_penyerahan; }
+    public function getActivitiesAttribute() { return $this->aktivitas ?? []; }
 }

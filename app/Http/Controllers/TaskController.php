@@ -162,6 +162,13 @@ class TaskController extends Controller
 
         $existingTask = KanbanTask::find($taskId);
 
+        $catatanRevisi = $request->input('catatan_revisi', $request->input('review_notes', $request->input('reviewNotes')));
+        $catatanPenyerahan = $request->input('catatan_penyerahan', $request->input('submission_notes', $request->input('submissionNotes')));
+        $aktivitas = $request->input('aktivitas', $request->input('activities', []));
+        if (! is_array($aktivitas)) {
+            $aktivitas = [];
+        }
+
         $task = KanbanTask::updateOrCreate(
             ['id' => $taskId],
             [
@@ -178,6 +185,9 @@ class TaskController extends Controller
                     : InputSanitizer::truncateStr((string) $user->id, 100),
                 'tenggat_waktu' => $tenggat,
                 'lampiran' => $lampiran,
+                'catatan_revisi' => $catatanRevisi !== null ? (string) $catatanRevisi : ($existingTask?->catatan_revisi),
+                'catatan_penyerahan' => $catatanPenyerahan !== null ? (string) $catatanPenyerahan : ($existingTask?->catatan_penyerahan),
+                'aktivitas' => ! empty($aktivitas) ? $aktivitas : ($existingTask?->aktivitas ?? []),
             ]
         );
 
@@ -233,6 +243,21 @@ class TaskController extends Controller
                 ], 422);
             }
             $data['lampiran'] = $lampiranUpdate;
+        }
+
+        if ($request->has('catatan_penyerahan') || $request->has('submission_notes') || $request->has('submissionNotes')) {
+            $data['catatan_penyerahan'] = $request->input('catatan_penyerahan', $request->input('submission_notes', $request->input('submissionNotes')));
+        }
+        if ($request->has('aktivitas') || $request->has('activities')) {
+            $akt = $request->input('aktivitas', $request->input('activities'));
+            if (is_array($akt)) {
+                $data['aktivitas'] = $akt;
+            }
+        }
+        if ($request->has('catatan_revisi') || $request->has('review_notes') || $request->has('reviewNotes')) {
+            if ($isAdmin || $request->input('catatan_revisi', $request->input('review_notes', $request->input('reviewNotes'))) === '') {
+                $data['catatan_revisi'] = $request->input('catatan_revisi', $request->input('review_notes', $request->input('reviewNotes')));
+            }
         }
 
         if ($isAdmin) {
