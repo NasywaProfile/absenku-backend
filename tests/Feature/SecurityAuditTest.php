@@ -701,4 +701,39 @@ class SecurityAuditTest extends TestCase
             'gambar' => ['https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'],
         ])->assertStatus(200);
     }
+
+    public function test_forgot_password_self_service_and_admin_reset_password(): void
+    {
+        // 1. Reset mandiri gagal jika nama tidak cocok
+        $this->postJson('/api/forgot-password', [
+            'email' => $this->employee->email,
+            'nama' => 'Nama Yang Salah',
+            'password' => 'PasswordBaru123',
+        ])->assertStatus(404);
+
+        // 2. Reset mandiri sukses jika email dan nama cocok persis (case-insensitive)
+        $this->postJson('/api/forgot-password', [
+            'email' => strtolower($this->employee->email),
+            'nama' => $this->employee->nama,
+            'password' => 'PasswordBaru123',
+        ])->assertStatus(200);
+
+        // Login dengan password baru wajib sukses
+        $loginRes = $this->postJson('/api/login', [
+            'email' => $this->employee->email,
+            'password' => 'PasswordBaru123',
+        ])->assertStatus(200);
+        $this->assertNotEmpty($loginRes->json('token'));
+
+        // 3. Admin mereset password karyawan target
+        Sanctum::actingAs($this->admin);
+        $this->postJson("/api/users/{$this->employee->id}/reset-password", [
+            'password' => 'PasswordDariAdmin456',
+        ])->assertStatus(200);
+
+        // 4. Admin biasa dilarang mereset password Super Admin
+        $this->postJson("/api/users/{$this->superAdmin->id}/reset-password", [
+            'password' => 'HackerSuperAdmin123',
+        ])->assertStatus(403);
+    }
 }

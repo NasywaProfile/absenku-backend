@@ -343,6 +343,85 @@ class AuthController extends Controller
         return response()->json($responsePayload);
     }
 
+    public function forgotPassword(Request $request)
+    {
+        $validated = $request->validate([
+            'email' => 'required|email|max:255',
+            'nama' => 'nullable|string|max:255',
+            'name' => 'nullable|string|max:255',
+            'password' => 'required|string|min:6|max:255',
+        ]);
+
+        $inputName = trim((string) ($validated['nama'] ?? $validated['name'] ?? ''));
+        if (empty($inputName)) {
+            return response()->json([
+                'message' => 'Nama lengkap wajib diisi untuk verifikasi akun.',
+            ], 422);
+        }
+
+        $email = trim(strtolower((string) $validated['email']));
+
+        // Cari pengguna berdasarkan email (case-insensitive)
+        $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
+
+        if (! $user) {
+            return response()->json([
+                'message' => 'Email atau nama lengkap tidak cocok dengan data akun terdaftar.',
+            ], 404);
+        }
+
+        // Verifikasi kesesuaian nama lengkap (case-insensitive & trimmed)
+        $dbName = trim(strtolower((string) $user->nama));
+        if ($dbName !== strtolower($inputName)) {
+            return response()->json([
+                'message' => 'Email atau nama lengkap tidak cocok dengan data akun terdaftar.',
+            ], 404);
+        }
+
+        // Perbarui kata sandi dengan hash baru
+        $user->password = Hash::make($validated['password']);
+        $user->save();
+
+        // Cabut seluruh token sesi aktif pengguna agar aman
+        $user->tokens()->delete();
+
+        return response()->json([
+            'message' => 'Kata sandi berhasil diperbarui. Silakan masuk menggunakan kata sandi baru Anda.',
+        ]);
+    }
+
+    public function resetUserPassword(Request $request, string $id)
+    {
+        $validated = $request->validate([
+            'password' => 'required|string|min:6|max:255',
+        ]);
+
+        $actor = $request->user();
+        $actorRole = strtoupper((string) ($actor->peran ?? ''));
+
+        $targetUser = User::find($id);
+        if (! $targetUser) {
+            return response()->json(['message' => 'Pengguna tidak ditemukan.'], 404);
+        }
+
+        $targetRole = strtoupper((string) ($targetUser->peran ?? ''));
+
+        // Admin biasa tidak boleh mereset password Super Admin atau sesama Admin
+        if ($actorRole !== 'SUPER_ADMIN' && in_array($targetRole, ['SUPER_ADMIN', 'ADMIN'], true) && $actor->id !== $targetUser->id) {
+            return response()->json(['message' => 'Hanya Super Admin yang berhak mereset kata sandi akun Admin / Super Admin.'], 403);
+        }
+
+        $targetUser->password = Hash::make($validated['password']);
+        $targetUser->save();
+
+        // Cabut seluruh token lama pengguna target
+        $targetUser->tokens()->delete();
+
+        return response()->json([
+            'message' => 'Kata sandi pengguna berhasil direset.',
+        ]);
+    }
+
     public function getUsers(Request $request)
     {
         $authUser = $request->user();
