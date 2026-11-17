@@ -20,10 +20,9 @@ class AttendanceController extends Controller
         $user = $request->user();
         $query = AttendanceRecord::query();
 
-        $role = strtoupper((string) ($user->peran ?? ''));
-        if (! in_array($role, ['SUPER_ADMIN', 'ADMIN'], true)) {
-            $query->where('pengguna_id', $user->id);
-        } elseif ($request->has('user_id') || $request->has('pengguna_id')) {
+        // Jika ada filter spesifik user_id, tampilkan milik user tersebut
+        // Jika tidak ada, kembalikan semua presensi agar matriks kehadiran tim tersinkronkan antar sesama karyawan
+        if ($request->has('user_id') || $request->has('pengguna_id')) {
             $targetId = $request->input('user_id', $request->input('pengguna_id'));
             $query->where('pengguna_id', $targetId);
         }

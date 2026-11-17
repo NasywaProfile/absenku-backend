@@ -18,8 +18,11 @@ class LeaveController extends Controller
         $query = LeaveRequest::query();
 
         $role = strtoupper($user->peran ?? '');
-        if (! in_array($role, ['SUPER_ADMIN', 'ADMIN'])) {
-            $query->where('pengguna_id', $user->id);
+        if (! in_array($role, ['SUPER_ADMIN', 'ADMIN'], true)) {
+            $query->where(function ($q) use ($user) {
+                $q->where('pengguna_id', $user->id)
+                  ->orWhere('status_pengajuan', 'APPROVED');
+            });
         }
 
         if ($request->has('status') || $request->has('status_pengajuan')) {
