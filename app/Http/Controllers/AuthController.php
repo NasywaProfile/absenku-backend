@@ -352,7 +352,7 @@ class AuthController extends Controller
     public function forgotPassword(Request $request)
     {
         $validated = $request->validate([
-            'email' => 'required|email|max:255',
+            'email' => 'required|string|max:255',
             'nama' => 'nullable|string|max:255',
             'name' => 'nullable|string|max:255',
             'password' => 'required|string|min:6|max:255',
@@ -367,8 +367,10 @@ class AuthController extends Controller
 
         $email = trim(strtolower((string) $validated['email']));
 
-        // Cari pengguna berdasarkan email (case-insensitive)
-        $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
+        // Cari pengguna berdasarkan email (case-insensitive) atau ID
+        $user = User::whereRaw('LOWER(email) = ?', [$email])
+            ->orWhere('id', trim((string) $validated['email']))
+            ->first();
 
         if (! $user) {
             return response()->json([
@@ -376,11 +378,26 @@ class AuthController extends Controller
             ], 404);
         }
 
-        // Verifikasi kesesuaian nama lengkap (case-insensitive, trimmed, toleran spasi berlebih)
+        // Verifikasi kesesuaian nama lengkap (fleksibel: exact, tanpa spasi, substring, atau per-kata)
         $cleanInputName = preg_replace('/\s+/', ' ', strtolower($inputName));
         $cleanDbName = preg_replace('/\s+/', ' ', strtolower(trim((string) ($user->nama ?: $user->name ?: ''))));
 
-        if ($cleanDbName !== $cleanInputName) {
+        $nameMatches = false;
+        if ($cleanDbName === $cleanInputName) {
+            $nameMatches = true;
+        } elseif (str_replace(' ', '', $cleanDbName) === str_replace(' ', '', $cleanInputName)) {
+            $nameMatches = true;
+        } elseif (str_contains($cleanDbName, $cleanInputName) || str_contains($cleanInputName, $cleanDbName)) {
+            $nameMatches = true;
+        } else {
+            $inputWords = array_filter(explode(' ', $cleanInputName));
+            $dbWords = array_filter(explode(' ', $cleanDbName));
+            if (! empty(array_intersect($inputWords, $dbWords))) {
+                $nameMatches = true;
+            }
+        }
+
+        if (! $nameMatches) {
             return response()->json([
                 'message' => 'Email atau nama lengkap tidak cocok dengan data akun terdaftar.',
             ], 404);
@@ -407,16 +424,22 @@ class AuthController extends Controller
         ]);
     }
 
-    public function resetUserPassword(Request $request, string $id)
+    public function resetUserPassword(Request $request, ?string $id = null)
     {
         $validated = $request->validate([
             'password' => 'required|string|min:6|max:255',
+            'user_id' => 'nullable|string',
+            'id' => 'nullable|string',
+            'email' => 'nullable|string',
         ]);
 
         $actor = $request->user();
         $actorRole = strtoupper((string) ($actor->peran ?? ''));
 
-        $targetUser = $this->findTargetUser((string) $id, $request->input('email'));
+        $targetId = (string) ($id ?: $request->input('user_id') ?: $request->input('id') ?: '');
+        $targetEmail = (string) ($request->input('email') ?: '');
+
+        $targetUser = $this->findTargetUser($targetId, $targetEmail);
         if (! $targetUser) {
             return response()->json(['message' => 'Pengguna tidak ditemukan.'], 404);
         }

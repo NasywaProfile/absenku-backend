@@ -22,7 +22,7 @@ Route::get('/login', function () {
 Route::get('/office-config', [OfficeConfigController::class, 'show'])->middleware('throttle:60,1');
 
 // Reset Password Mandiri Publik (Memerlukan verifikasi Email + Nama Lengkap terdaftar)
-Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:6,1');
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:30,1');
 
 // Authenticated Routes (diizinkan juga untuk akun PENDING_APPROVAL saat onboarding & cek status)
 Route::middleware('auth:sanctum')->group(function () {
@@ -52,7 +52,8 @@ Route::middleware(['auth:sanctum', EnsureUserIsActive::class])->group(function (
         Route::match(['put', 'post'], '/users/{id}/approve', [AuthController::class, 'approveUser']);
         Route::match(['put', 'post'], '/users/{id}/role', [AuthController::class, 'updateUserRole']);
         Route::match(['put', 'post'], '/users/{id}/employment-type', [AuthController::class, 'updateEmploymentType']);
-        Route::match(['put', 'post'], '/users/{id}/reset-password', [AuthController::class, 'resetUserPassword']);
+        Route::match(['put', 'post'], '/users/{id}/reset-password', [AuthController::class, 'resetUserPassword'])->where('id', '.*');
+        Route::match(['put', 'post'], '/users/reset-password', [AuthController::class, 'resetUserPassword']);
         Route::post('/users/{id}/reject', [AuthController::class, 'rejectUser']);
         Route::delete('/users/{id}', [AuthController::class, 'deleteUser']);
 
