@@ -122,12 +122,23 @@ class UploadController extends Controller
         $filename = time() . '_' . Str::random(16) . '.' . $extension;
         $path = $file->storeAs('uploads', $filename, 'public');
 
-        $baseUrl = rtrim((string) (config('app.url') ?: $request->getSchemeAndHttpHost()), '/');
-        $url = $baseUrl . '/storage/' . $path;
+        $requestHost = rtrim((string) $request->getSchemeAndHttpHost(), '/');
+        $configUrl = rtrim((string) config('app.url', ''), '/');
+        $isLocalConfig = str_contains($configUrl, 'localhost') || str_contains($configUrl, '127.0.0.1');
+
+        // Prioritaskan host request jika config app.url belum diatur atau masih localhost/127.0.0.1
+        $baseUrl = (! empty($requestHost) && ($isLocalConfig || empty($configUrl)))
+            ? $requestHost
+            : ($configUrl ?: $requestHost);
+
+        $url = rtrim($baseUrl, '/') . '/storage/' . $path;
+        $relativeUrl = '/storage/' . $path;
 
         return response()->json([
             'message' => 'Berkas berhasil diunggah.',
             'url' => $url,
+            'relative_url' => $relativeUrl,
+            'path' => $path,
             'name' => $originalName,
             'size' => $fileSize,
             'type' => $detectedMime,

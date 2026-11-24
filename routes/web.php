@@ -18,3 +18,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::match(['put', 'post'], '/users/reset-password', [AuthController::class, 'resetUserPassword']);
     Route::match(['put', 'post'], '/api/users/reset-password', [AuthController::class, 'resetUserPassword']);
 });
+
+// Rute streaming berkas lampiran dari disk publik (PDF, gambar, dokumen)
+Route::get('/storage/uploads/{filename}', function ($filename) {
+    $cleanFilename = basename($filename);
+    $path = storage_path('app/public/uploads/' . $cleanFilename);
+    if (! file_exists($path) || ! is_file($path)) {
+        abort(404, 'Berkas lampiran tidak ditemukan.');
+    }
+    return response()->file($path);
+})->where('filename', '[a-zA-Z0-9_\.-]+');

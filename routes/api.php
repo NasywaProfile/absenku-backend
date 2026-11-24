@@ -24,6 +24,16 @@ Route::get('/office-config', [OfficeConfigController::class, 'show'])->middlewar
 // Reset Password Mandiri Publik (Memerlukan verifikasi Email + Nama Lengkap terdaftar)
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword'])->middleware('throttle:60,1');
 
+// Rute fallback akses lampiran publik melalui prefix /api
+Route::get('/storage/uploads/{filename}', function ($filename) {
+    $cleanFilename = basename($filename);
+    $path = storage_path('app/public/uploads/' . $cleanFilename);
+    if (! file_exists($path) || ! is_file($path)) {
+        abort(404, 'Berkas lampiran tidak ditemukan.');
+    }
+    return response()->file($path);
+})->where('filename', '[a-zA-Z0-9_\.-]+');
+
 // Authenticated Routes (diizinkan juga untuk akun PENDING_APPROVAL saat onboarding & cek status)
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
