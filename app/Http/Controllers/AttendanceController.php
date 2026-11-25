@@ -56,6 +56,7 @@ class AttendanceController extends Controller
         $isAdmin = in_array($role, ['SUPER_ADMIN', 'ADMIN'], true);
 
         $requestedUserId = $request->input('user_id', $request->input('pengguna_id'));
+        $requestedUserName = $request->input('user_name', $request->input('nama_karyawan'));
         $isAdminEditingOther = false;
 
         if ($requestedUserId && $requestedUserId !== $user->id) {
@@ -64,7 +65,30 @@ class AttendanceController extends Controller
                     'message' => 'Operasi ditolak: Anda tidak berhak mencatat presensi atas nama pengguna lain.',
                 ], 403);
             }
-            $targetUser = User::find($requestedUserId);
+            $targetUser = null;
+            if ($requestedUserId !== 'usr_unknown') {
+                $targetUser = User::where('id', $requestedUserId)->first();
+            }
+            if (! $targetUser && $requestedUserName) {
+                $targetUser = User::whereRaw('LOWER(nama) = ?', [strtolower(trim((string) $requestedUserName))])->first();
+                if (! $targetUser) {
+                    $targetUser = User::whereRaw('LOWER(nama) LIKE ?', ['%' . strtolower(trim((string) $requestedUserName)) . '%'])->first();
+                }
+            }
+            if (! $targetUser) {
+                return response()->json(['message' => 'Pengguna target tidak ditemukan.'], 404);
+            }
+            if ($targetUser->id === 'usr_super_admin' || strtoupper((string) $targetUser->peran) === 'SUPER_ADMIN') {
+                return response()->json([
+                    'message' => 'Data presensi Super Administrator tidak dapat dimodifikasi.',
+                ], 403);
+            }
+            $isAdminEditingOther = true;
+        } elseif ($isAdmin && $requestedUserName && strtolower(trim((string) $requestedUserName)) !== strtolower(trim((string) $user->nama))) {
+            $targetUser = User::whereRaw('LOWER(nama) = ?', [strtolower(trim((string) $requestedUserName))])->first();
+            if (! $targetUser) {
+                $targetUser = User::whereRaw('LOWER(nama) LIKE ?', ['%' . strtolower(trim((string) $requestedUserName)) . '%'])->first();
+            }
             if (! $targetUser) {
                 return response()->json(['message' => 'Pengguna target tidak ditemukan.'], 404);
             }
@@ -257,27 +281,34 @@ class AttendanceController extends Controller
     {
         $today = $request->input('date', $request->input('tanggal', Carbon::now('Asia/Jakarta')->toDateString()));
         if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $today)) {
-            return response()->json(['message' => 'Format tanggal harus YYYY-MM-DD.'], 422);
+            $today = Carbon::now('Asia/Jakarta')->toDateString();
         }
 
-        $jamMasuk = (string) $request->input('jam_masuk', $request->input('clock_in_time', '08:00:00'));
-        if (! preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $jamMasuk)) {
-            return response()->json(['message' => 'Format jam masuk harus HH:mm atau HH:mm:ss.'], 422);
+        $rawJam = (string) $request->input('jam_masuk', $request->input('clock_in_time', '08:00:00'));
+        $cleanJam = preg_replace('/\s*(wib|wita|wit)\s*$/i', '', trim($rawJam));
+        if ($cleanJam === '' || $cleanJam === '-') {
+            $jamMasuk = '08:00:00';
+        } elseif (preg_match('/^\d{1,2}:\d{2}$/', $cleanJam)) {
+            $jamMasuk = str_pad($cleanJam, 5, '0', STR_PAD_LEFT) . ':00';
+        } elseif (preg_match('/^\d{1,2}:\d{2}:\d{2}$/', $cleanJam)) {
+            $jamMasuk = str_pad($cleanJam, 8, '0', STR_PAD_LEFT);
+        } else {
+            $jamMasuk = '08:00:00';
         }
 
         $statusLokasi = strtoupper((string) $request->input('status_lokasi', $request->input('clock_in_location_status', 'IN_OFFICE')));
         if (! in_array($statusLokasi, ['IN_OFFICE', 'OUT_OF_RANGE', 'WFH_APPROVED', 'DINAS_APPROVED'], true)) {
-            return response()->json(['message' => 'Status lokasi tidak valid.'], 422);
+            $statusLokasi = 'IN_OFFICE';
         }
 
         $statusHadir = strtoupper((string) $request->input('status_kehadiran', $request->input('clock_in_status', 'ON_TIME')));
         if (! in_array($statusHadir, ['ON_TIME', 'LATE'], true)) {
-            return response()->json(['message' => 'Status kehadiran tidak valid.'], 422);
+            $statusHadir = 'ON_TIME';
         }
 
         $mode = strtoupper((string) $request->input('mode_kerja', $request->input('work_mode', 'WFO')));
         if (! in_array($mode, ['WFO', 'WFH', 'DINAS'], true)) {
-            return response()->json(['message' => 'Mode kerja tidak valid.'], 422);
+            $mode = 'WFO';
         }
 
         $menitTerlambat = $statusHadir === 'LATE'
@@ -340,6 +371,13 @@ class AttendanceController extends Controller
 
         $date = $request->input('date', $request->input('tanggal', Carbon::now('Asia/Jakarta')->toDateString()));
         $targetUserId = $request->input('user_id', $request->input('pengguna_id'));
+        if (! $targetUserId && ($request->input('user_name') || $request->input('nama_karyawan'))) {
+            $name = $request->input('user_name', $request->input('nama_karyawan'));
+            $found = User::whereRaw('LOWER(nama) = ?', [strtolower(trim((string) $name))])->first();
+            if ($found) {
+                $targetUserId = $found->id;
+            }
+        }
 
         if (! $targetUserId) {
             return response()->json(['message' => 'User ID diperlukan.'], 422);
