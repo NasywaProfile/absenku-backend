@@ -124,12 +124,24 @@ class AttendanceController extends Controller
             }
         }
 
-        // Cegah manipulasi presensi ganda / menimpa catatan terlambat di hari yang sama
+        // Cegah manipulasi presensi ganda / menimpa jam masuk atau status di hari yang sama
         $existingToday = AttendanceRecord::where('pengguna_id', $targetUser->id)
             ->where('tanggal', $today)
             ->first();
 
         if ($existingToday) {
+            // Jika pengguna mengirim atau memperbarui catatan / alasan keterlambatan
+            if ($catatan !== null) {
+                $existingToday->update([
+                    'catatan' => $catatan !== '' ? $catatan : null,
+                ]);
+
+                return response()->json([
+                    'message' => 'Alasan / catatan presensi berhasil disimpan.',
+                    'record' => $existingToday->fresh(),
+                ], 200);
+            }
+
             return response()->json([
                 'message' => 'Presensi masuk untuk hari ini sudah tercatat dan tidak dapat diubah.',
                 'record' => $existingToday,
