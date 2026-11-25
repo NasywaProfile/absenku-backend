@@ -100,6 +100,30 @@ class AttendanceController extends Controller
         $today = $nowWib->toDateString();
         $jamMasuk = $nowWib->format('H:i:s');
 
+        // Terima tanggal & jam presensi yang tersimpan di perangkat (misal saat sinkronisasi tertunda/offline)
+        $requestedDate = $request->input('date', $request->input('tanggal'));
+        $requestedTime = $request->input('clock_in_time', $request->input('jam_masuk'));
+
+        if ($requestedDate && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $requestedDate)) {
+            if ($requestedDate <= $today) {
+                $today = (string) $requestedDate;
+            }
+        }
+
+        $evalCarbon = $nowWib;
+        if ($requestedTime && preg_match('/^\d{1,2}:\d{2}(:\d{2})?$/', (string) $requestedTime)) {
+            $cleanTime = strlen((string) $requestedTime) === 5 ? ((string) $requestedTime) . ':00' : (string) $requestedTime;
+            try {
+                $parsedTime = Carbon::createFromFormat('Y-m-d H:i:s', $today . ' ' . $cleanTime, 'Asia/Jakarta');
+                if ($parsedTime->lessThanOrEqualTo($nowWib->copy()->addMinutes(5))) {
+                    $jamMasuk = $parsedTime->format('H:i:s');
+                    $evalCarbon = $parsedTime;
+                }
+            } catch (\Throwable $e) {
+                $evalCarbon = $nowWib;
+            }
+        }
+
         // Cegah manipulasi presensi ganda / menimpa catatan terlambat di hari yang sama
         $existingToday = AttendanceRecord::where('pengguna_id', $targetUser->id)
             ->where('tanggal', $today)
@@ -183,7 +207,7 @@ class AttendanceController extends Controller
 
         // Hitung ketepatan waktu dan menit keterlambatan secara otoritatif di server
         [$statusHadir, $menitTerlambat] = $this->calculatePunctuality(
-            $nowWib,
+            $evalCarbon,
             (string) ($office->jam_masuk ?: '08:00'),
             (int) ($office->toleransi_keterlambatan_menit ?? 0)
         );
